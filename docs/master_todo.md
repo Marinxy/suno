@@ -30,5 +30,5 @@
 
 ## Upcoming After Bundles
 - ✅ Library health overview badges (album-level rollups) — albums now inherit readiness badges with song status breakdowns.
-- ☐ Optional spectrum visualization hooks (placeholder for EXPOSE import).
-- ☐ Automated reminders / notifications (stretch goal).
+- ✅ Optional spectrum visualization hooks — analytics tab accepts quick dB snapshots and renders placeholder bars.
+- ✅ Automated reminders / notifications — reminders card tracks outstanding QA, mastering, release tasks with dismiss/reset.

@@ -97,6 +97,7 @@ type VersionRecord = {
   masteringNotes?: string;
   exposeLog?: string;
   spectrumNotes?: string;
+  spectrumSnapshot?: string;
   qaChecks: Record<string, boolean>;
   shareUrl?: string;
   sunoUrl?: string;
@@ -232,6 +233,20 @@ const SONG_WORKFLOW_TABS: SongWorkflowTabDefinition[] = [
   { id: "release", label: "Release", description: "SoundCloud + rollout tracking", icon: Share2 },
   { id: "analytics", label: "Analytics", description: "Expose metrics & spectrum notes", icon: ClipboardList }
 ];
+
+type ReminderLevel = "info" | "warning" | "critical";
+
+type ReminderItem = {
+  id: string;
+  level: ReminderLevel;
+  message: string;
+};
+
+const REMINDER_STYLES: Record<ReminderLevel, { badge: string; border: string }> = {
+  info: { badge: "bg-violet-900/40 text-violet-100", border: "border-violet-700/50" },
+  warning: { badge: "bg-amber-600/40 text-amber-100", border: "border-amber-600/50" },
+  critical: { badge: "bg-rose-700/50 text-rose-100", border: "border-rose-700/60" }
+};
 
 const META_TAGS = [
   "high_fidelity",
@@ -497,6 +512,117 @@ const DEFAULT_VERSION_QA = QA_ITEMS.reduce<Record<string, boolean>>((acc, item) 
   return acc;
 }, {});
 
+const SAMPLE_VERSION_QA: Record<string, boolean> = {
+  ...DEFAULT_VERSION_QA,
+  conflicts: true,
+  "bpm-key": true,
+  lufs: true,
+  sibilance: true,
+  mono: true,
+  "meta-added": true
+};
+
+const DEFAULT_SAMPLE_PROJECTS: ProjectRecord[] = [
+  {
+    id: "sample_project_unya_showcase",
+    name: "UN&YA Showcase",
+    description: "Sample dataset demonstrating the full Suno workflow.",
+    createdAt: "2025-01-12T10:00:00.000Z",
+    notes: "This sample project is safe to delete once you start logging real work.",
+    songs: [
+      {
+        id: "sample_song_fragments",
+        projectId: "sample_project_unya_showcase",
+        title: "Fragments of Silence",
+        bpm: "128",
+        key: "E minor",
+        structure: "Intro – Verse – Pre – Chorus – Drop – Bridge – Outro",
+        status: "approved",
+        references: ["Hybrid orchestral swells", "Cyber-brutalist pulse"],
+        notes: "Use this record to explore prompts, iterations, mastering, and release tracking.",
+        versions: [
+          {
+            id: "sample_version_v1_2_0",
+            songId: "sample_song_fragments",
+            label: "v1.2.0",
+            seed: "seed-2417",
+            bpm: "128",
+            key: "E minor",
+            duration: "2:48",
+            structureNotes: "Locked chorus lift and extended outro riser.",
+            prompt: `[Genre=Industrial Metal] [Subgenre=Cyber-Brutalist, Slavonic Anthemic]\n[Energy=High] [Tempo=128bpm] [Key=E minor] [TimeSig=4/4]\n[Vocal=Duet(Male deep, Female ethereal)] [Language=English]\n[Structure=Intro–Verse–Pre–Chorus–Chorus–Bridge–Outro]\n[Instrumentation=Drop-tuned guitars, distorted bass, glitched synths, hybrid orchestra, live drums]\n[Hooks=Choir synth doubles chorus melody]\n[MixNotes=warm_low_end, tight_highs, stereo_depth, clear_guitar]\n[Exclude=rap, screamo, trap_hats, vinyl_crackle]`,
+            exclude: "",
+            metaTags: [
+              "high_fidelity",
+              "studio_mix",
+              "clean_master",
+              "no_artifacts",
+              "clear_vocals",
+              "warm_low_end",
+              "tight_highs",
+              "analog_warmth",
+              "stereo_depth",
+              "crystal_clarity"
+            ],
+            lyricTags: "[high_fidelity] [studio_mix] [clean_master]",
+            lyrics: `[Intro]\nConcrete skies breathe in the dawn\nCold horizon carries on\n\n[Verse]\nMarching steps in echo halls\nSignals bloom through iron walls\n\n[Chorus]\nFragments of silence wake tonight\nSteel hearts are learning how to fight`,
+            iterationPlan: "Tighten chorus guitars, widen pads, reinforce outro vocal stack.",
+            notes: "Seed 2417 carried the best structure; minor EQ tweaks smoothed harshness.",
+            lufs: "-11.6",
+            truePeak: "-1.1",
+            exportName: "Fragments_of_Silence_v1.2.0_seed-2417",
+            masteringNotes: "BandLab Universal (low). Input -1.9dB, Tape 45%. Added analog warmth.",
+            exposeLog: "Integrated: -11.6 LUFS\nShort-term: -11.2 LUFS\nTrue Peak: -1.1 dBTP\nLRA: 7.2 dB",
+            spectrumNotes: "Slight lift at 3k for vocal clarity; tightened low mids.",
+            spectrumSnapshot: "60Hz:-6\n200Hz:-4\n1kHz:-3\n4kHz:-5\n8kHz:-6.5",
+            qaChecks: SAMPLE_VERSION_QA,
+            shareUrl: "https://app.suno.ai/share/fragment-sample",
+            sunoUrl: "https://app.suno.ai/song/sample-fragments",
+            soundcloudUrl: "https://soundcloud.com/unya/fragments-of-silence-demo",
+            createdAt: "2025-01-11T18:30:00.000Z",
+            status: "approved",
+            takes: [
+              {
+                id: "sample_take_a",
+                versionId: "sample_version_v1_2_0",
+                label: "Take A",
+                shareUrl: "https://app.suno.ai/share/fragment-sample",
+                notes: "Winning seed with clean chorus",
+                selected: true
+              },
+              {
+                id: "sample_take_b",
+                versionId: "sample_version_v1_2_0",
+                label: "Take B",
+                shareUrl: "https://app.suno.ai/share/fragment-variation",
+                notes: "Alternate bridge textures",
+                selected: false
+              }
+            ],
+            releasePlans: [
+              {
+                id: "sample_release_soundcloud",
+                platform: "soundcloud",
+                url: "https://soundcloud.com/unya/fragments-of-silence-demo",
+                releaseDate: "2025-01-14",
+                status: "released",
+                notes: "Public link for showcase deck"
+              },
+              {
+                id: "sample_release_bandcamp",
+                platform: "bandcamp",
+                url: "",
+                releaseDate: "2025-01-20",
+                status: "scheduled",
+                notes: "Upload stems pack"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+];
 function makeId() {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
@@ -546,7 +672,8 @@ function convertLegacyVersion(version: VersionRecord): VersionWorkflowRecord {
     finalPromptId: promptSnapshot?.id,
     finalLyricsId: version.lyrics ? promptSnapshot?.id : undefined,
     finalReleaseUrl: version.soundcloudUrl || version.shareUrl || undefined,
-    masteringProfile: buildDefaultMasteringProfile(version)
+    masteringProfile: buildDefaultMasteringProfile(version),
+    spectrumSnapshot: version.spectrumSnapshot
   };
 }
 
@@ -791,6 +918,7 @@ function downgradeVersionToLegacy(version: VersionWorkflowRecord): VersionRecord
     masteringNotes: version.masteringNotes ?? version.masteringProfile.bandlab.notes,
     exposeLog: version.exposeLog ?? version.masteringProfile.expose.notes,
     spectrumNotes: version.spectrumNotes,
+    spectrumSnapshot: version.spectrumSnapshot,
     qaChecks: version.qaChecks,
     shareUrl: version.shareUrl,
     sunoUrl: version.sunoUrl,
@@ -911,7 +1039,7 @@ export default function SunoMagixLike() {
   const [view, setView] = useState<"create" | "generate" | "refine" | "master" | "publish" | "library">("create");
   const [promptForm, setPromptForm] = useLocalStorageState<PromptForm>("suno_prompt_form_v2", DEFAULT_PROMPT_FORM);
   const [selectedMetaTags, setSelectedMetaTags] = useLocalStorageState<string[]>("suno_meta_tags_v2", DEFAULT_META_SELECTION);
-  const [projects, setProjects] = useLocalStorageState<ProjectRecord[]>("suno_projects_v2", []);
+  const [projects, setProjects] = useLocalStorageState<ProjectRecord[]>("suno_projects_v2", DEFAULT_SAMPLE_PROJECTS);
   const [libraryAlbums, setLibraryAlbums] = useLocalStorageState<AlbumRecord[]>("suno_library_v1", []);
   const [checklistState, setChecklistState] = useLocalStorageState<Record<string, boolean>>("suno_checklists_v2", {});
 
@@ -940,6 +1068,7 @@ export default function SunoMagixLike() {
     notes: ""
   });
   const [exportVersionId, setExportVersionId] = useState<string>("");
+  const [dismissedReminders, setDismissedReminders] = useLocalStorageState<string[]>("suno_reminders_dismissed_v1", []);
 
   const [projectDraftName, setProjectDraftName] = useState<string>("");
   const [projectDraftNotes, setProjectDraftNotes] = useState<string>("");
@@ -987,6 +1116,64 @@ export default function SunoMagixLike() {
     };
     return { albumCount, songCount, versionCount, albumStatusCounts };
   }, [libraryAlbums]);
+
+  const reminders = useMemo(() => {
+    const items: ReminderItem[] = [];
+    libraryAlbums.forEach(album => {
+      album.songs.forEach(song => {
+        if (!song.versions.length) {
+          items.push({
+            id: `reminder_song_${song.id}_no_versions`,
+            level: "info",
+            message: `Add the first version for “${song.title}” in “${album.name}”.`
+          });
+          return;
+        }
+        song.versions.forEach(version => {
+          const health = deriveVersionHealth(version);
+          if (!health.qa.allDone) {
+            items.push({
+              id: `reminder_version_${version.id}_qa`,
+              level: "warning",
+              message: `Complete QA checks (${health.qa.pending.length} pending) for “${song.title}” – ${version.label}.`
+            });
+          }
+          if (health.missingFinalUrl) {
+            items.push({
+              id: `reminder_version_${version.id}_final_url`,
+              level: "warning",
+              message: `Log the final release URL for “${song.title}” – ${version.label}.`
+            });
+          }
+          if (health.exposeIssue) {
+            items.push({
+              id: `reminder_version_${version.id}_expose_issue`,
+              level: "critical",
+              message: `Investigate EXPOSE issues for “${song.title}” – ${version.label}.`
+            });
+          }
+          if (health.exposeWarning || health.lufsOutOfRange || health.truePeakOutOfRange) {
+            items.push({
+              id: `reminder_version_${version.id}_mastering_warn`,
+              level: "warning",
+              message: `Review mastering metrics for “${song.title}” – ${version.label} (LUFS/TP outside target).`
+            });
+          }
+        });
+      });
+    });
+    return items.filter(item => !dismissedReminders.includes(item.id));
+  }, [libraryAlbums, dismissedReminders]);
+
+  const activeReminders = useMemo(() => reminders.slice(0, 5), [reminders]);
+
+  const dismissReminder = useCallback((id: string) => {
+    setDismissedReminders(prev => (prev.includes(id) ? prev : [...prev, id]));
+  }, [setDismissedReminders]);
+
+  const resetReminders = useCallback(() => {
+    setDismissedReminders([]);
+  }, [setDismissedReminders]);
 
   useEffect(() => {
     if (!libraryAlbums.length) {
@@ -1143,8 +1330,8 @@ export default function SunoMagixLike() {
   }, [mutateVersion]);
 
   const formatCommaList = (values?: string[]) => (values && values.length ? values.join(", ") : "");
-  const parseCommaList = (value: string) => value.split(",").map(item => item.trim()).filter(Boolean);
-  const formatLines = (values?: string[]) => (values && values.length ? values.join("\n") : "");
+const parseCommaList = (value: string) => value.split(",").map(item => item.trim()).filter(Boolean);
+const formatLines = (values?: string[]) => (values && values.length ? values.join("\n") : "");
 const parseLines = (value: string) => value.split(/\n+/).map(item => item.trim()).filter(Boolean);
 
 const parseNumeric = (value?: string) => {
@@ -1152,6 +1339,26 @@ const parseNumeric = (value?: string) => {
   const match = value.match(/-?\d+(?:\.\d+)?/);
   return match ? Number(match[0]) : null;
 };
+
+type SpectrumPoint = {
+  label: string;
+  value: number;
+};
+
+function parseSpectrumSnapshot(snapshot?: string): SpectrumPoint[] {
+  if (!snapshot) return [];
+  return snapshot
+    .split(/\n+/)
+    .map(line => line.trim())
+    .filter(Boolean)
+    .map(line => {
+      const [labelRaw, valueRaw] = line.split(/[:=]/);
+      const label = (labelRaw ?? "").trim();
+      const value = parseNumeric(valueRaw?.trim());
+      return label && value !== null ? { label, value } : null;
+    })
+    .filter((point): point is SpectrumPoint => point !== null);
+}
 
 const QA_STATUS_LABELS: Record<string, string> = {
   prompt_clean: "Prompt clean",
@@ -2204,6 +2411,39 @@ function deriveAlbumHeadline(album: AlbumRecord) {
                           />
                           <div className="rounded border border-zinc-800 bg-zinc-950/60 p-3 space-y-2">
                             <div className="uppercase tracking-wide text-zinc-500 text-[11px]">Spectrum Helper</div>
+                            <Textarea
+                              value={version.spectrumSnapshot || ""}
+                              onChange={e => updateVersionSimpleField(version.id, "spectrumSnapshot", e.target.value || undefined)}
+                              rows={3}
+                              className="bg-zinc-950 border-zinc-800 text-[12px]"
+                              placeholder="Example:\n60Hz:-6\n200Hz:-4\n1kHz:-3\n4kHz:-5"
+                            />
+                            {(() => {
+                              const spectrumPoints = parseSpectrumSnapshot(version.spectrumSnapshot);
+                              if (!spectrumPoints.length) {
+                                return <div className="text-[11px] text-zinc-500">Paste quick dB readings (Freq:Value) to visualize relative balance.</div>;
+                              }
+                              return (
+                                <div className="space-y-1">
+                                  {spectrumPoints.map(point => {
+                                    const normalized = Math.max(0, Math.min(1, (point.value + 60) / 60));
+                                    const widthPercent = 15 + normalized * 85;
+                                    return (
+                                      <div key={point.label} className="flex items-center gap-2">
+                                        <span className="text-[11px] text-zinc-500 w-12">{point.label}</span>
+                                        <div className="flex-1 h-2 rounded bg-zinc-800 overflow-hidden">
+                                          <div
+                                            className={`${normalized > 0.8 ? "bg-emerald-500" : normalized < 0.3 ? "bg-amber-500" : "bg-violet-500"} h-2`}
+                                            style={{ width: `${widthPercent}%` }}
+                                          />
+                                        </div>
+                                        <span className="text-[11px] text-zinc-400 w-10 text-right">{point.value.toFixed(1)}dB</span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              );
+                            })()}
                             <div className={`text-[11px] ${health.lufsOutOfRange ? "text-amber-300" : "text-zinc-400"}`}>
                               Target LUFS −12 ±2 → {health.lufs === null ? "n/a" : `${health.lufs.toFixed(1)} dB`}
                             </div>
@@ -2585,6 +2825,7 @@ function deriveAlbumHeadline(album: AlbumRecord) {
   );
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-200 flex flex-col">
+      <div className="px-4 py-2 text-[11px] font-semibold text-amber-300 tracking-wide">THIS IS A TEST SAMPLE</div>
       <header className="bg-zinc-900 border-b border-zinc-800 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Music2 className="w-6 h-6 text-violet-300" />
@@ -3894,6 +4135,42 @@ function deriveAlbumHeadline(album: AlbumRecord) {
       {view === "library" && (
         <div className="flex-1 overflow-y-auto">
           <div className="p-6 space-y-6">
+            {(activeReminders.length > 0 || dismissedReminders.length > 0) && (
+              <Card className="bg-zinc-900/80 border-zinc-800">
+                <CardHeader className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <CardTitle className="flex items-center gap-2 text-violet-200">
+                    <AlertTriangle className="w-5 h-5" /> Automated Reminders
+                  </CardTitle>
+                  {dismissedReminders.length > 0 && (
+                    <Button size="sm" variant="ghost" className="text-xs text-zinc-400 hover:text-zinc-200" onClick={resetReminders}>
+                      Reset dismissed
+                    </Button>
+                  )}
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {activeReminders.length === 0 ? (
+                    <p className="text-xs text-zinc-500">All reminders cleared. Reset dismissed to surface them again.</p>
+                  ) : (
+                    activeReminders.map(reminder => {
+                      const styles = REMINDER_STYLES[reminder.level];
+                      return (
+                        <div key={reminder.id} className={`border ${styles.border} bg-zinc-950/60 rounded px-3 py-2 text-xs text-zinc-200 flex items-start justify-between gap-3`}> 
+                          <div className="flex-1">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] uppercase tracking-wide mr-2 ${styles.badge}`}>
+                              {reminder.level === "critical" ? "Critical" : reminder.level === "warning" ? "Warning" : "Info"}
+                            </span>
+                            {reminder.message}
+                          </div>
+                          <Button size="sm" variant="ghost" className="text-[11px] text-zinc-400 hover:text-zinc-100" onClick={() => dismissReminder(reminder.id)}>
+                            Dismiss
+                          </Button>
+                        </div>
+                      );
+                    })
+                  )}
+                </CardContent>
+              </Card>
+            )}
             <Card className="bg-zinc-900/70 border-zinc-800">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-violet-200">
