@@ -5,6 +5,7 @@ import { Music2, MapPin, Rocket, Disc3, Share2, ClipboardList, ChevronRight } fr
 import PromptWorkspace from "../prompt/PromptWorkspace"
 import GenerationWorkspace from "../generation/GenerationWorkspace"
 import MasteringWorkspace from "../mastering/MasteringWorkspace"
+import ReleaseWorkspace from "../release/ReleaseWorkspace"
 
 const workflowTabs: { id: WorkflowStage; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: "prompt", label: "Prompt", icon: MapPin },
@@ -133,6 +134,16 @@ const AppShell: React.FC = () => {
       )
     }
 
+    if (activeTab === "release") {
+      return (
+        <ReleaseWorkspace
+          key={selectedVersion.id}
+          version={selectedVersion}
+          onUpdateVersion={updateSelectedVersion}
+        />
+      )
+    }
+
     return (
       <div className="space-y-4 text-sm text-zinc-300">
         <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-5">
@@ -152,6 +163,91 @@ const AppShell: React.FC = () => {
       </div>
     )
   }, [activeTab, selectedSong, selectedVersion, updateSelectedVersion])
+
+  const dashboardStats = useMemo(() => {
+    const songs = albums.flatMap(album => album.songs)
+    const versions = songs.flatMap(song => song.versions)
+    const readyAlbums = albums.filter(album =>
+      album.songs.length > 0 &&
+      album.songs.every(song => song.versions.length > 0 && song.versions.every(version => version.finalReleaseUrl))
+    ).length
+    const attentionAlbums = albums.filter(album =>
+      album.songs.some(song =>
+        song.versions.some(version => !version.finalReleaseUrl || Object.values(version.qaChecks).some(check => !check))
+      )
+    ).length
+    const inProgressAlbums = Math.max(albums.length - readyAlbums - attentionAlbums, 0)
+    return {
+      albumCount: albums.length,
+      songCount: songs.length,
+      versionCount: versions.length,
+      readyAlbums,
+      inProgressAlbums,
+      attentionAlbums
+    }
+  }, [albums])
+
+  const reminders: Reminder[] = useMemo(() => {
+    const list: Reminder[] = []
+    albums.forEach(album => {
+      album.songs.forEach(song => {
+        if (song.versions.length === 0) {
+          list.push({
+            id: `reminder_${song.id}_no_versions`,
+            level: "info",
+            message: `Create the first version for “${song.title}” in ${album.name}.`
+          })
+          return
+        }
+        song.versions.forEach(version => {
+          if (!version.finalReleaseUrl) {
+            list.push({
+              id: `reminder_${version.id}_final_url`,
+              level: "warning",
+              message: `Add the final release URL for “${song.title}” – ${version.label}.`
+            })
+          }
+          if (Object.values(version.qaChecks).some(check => !check)) {
+            list.push({
+              id: `reminder_${version.id}_qa`,
+              level: "warning",
+              message: `Complete QA checklist for “${song.title}” – ${version.label}.`
+            })
+          }
+          if (version.releasePlans.some(plan => plan.status === "scheduled" && !plan.releaseDate)) {
+            list.push({
+              id: `reminder_${version.id}_release_date`,
+              level: "info",
+              message: `Add release date to scheduled plan for “${song.title}” – ${version.label}.`
+            })
+          }
+        })
+      })
+    })
+    return list
+  }, [albums])
+
+  const upcoming: UpcomingRelease[] = useMemo(() => {
+    const items: UpcomingRelease[] = []
+    albums.forEach(album => {
+      album.songs.forEach(song => {
+        song.versions.forEach(version => {
+          version.releasePlans.forEach(plan => {
+            if (plan.releaseDate && plan.status === "scheduled") {
+              items.push({
+                id: `${version.id}_${plan.id}`,
+                songTitle: song.title,
+                versionLabel: version.label,
+                platform: plan.platform,
+                releaseDate: plan.releaseDate
+              })
+            }
+          })
+        })
+      })
+    })
+    return items.sort((a, b) => a.releaseDate.localeCompare(b.releaseDate))
+  }, [albums])
 
   return (
     <div className="flex min-h-screen bg-zinc-950 text-zinc-100">
@@ -254,7 +350,15 @@ const AppShell: React.FC = () => {
         </header>
 
         <div className="flex flex-1 overflow-hidden">
-          <section className="flex-1 overflow-y-auto px-6 py-6">{workspaceContent}</section>
+          <section className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
+            <DashboardSummary
+              stats={dashboardStats}
+              reminders={reminders}
+              upcoming={upcoming}
+              onNavigate={setActiveTab}
+            />
+            {workspaceContent}
+          </section>
 
           <aside className="hidden w-72 flex-col border-l border-zinc-800 bg-zinc-950/70 px-5 py-6 lg:flex">
             <h2 className="text-sm font-semibold text-violet-200">Workflow Assistant</h2>

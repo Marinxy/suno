@@ -1,6 +1,6 @@
 # Suno Master Studio 2.0 — Implementation To-Do
 
-The legacy prototype is complete. We now rebuild the app around the true workflow described in the latest brief.
+Legacy prototype is complete; the app is now being rebuilt around the actual workflow.
 
 ## Phase 0 · Foundations
 1. ✅ Define new data model & store
@@ -32,14 +32,15 @@ The legacy prototype is complete. We now rebuild the app around the true workflo
    - QA checklist editable alongside mastering notes/log
 
 ## Phase 5 · Release Console
-6. ☐ Release tab
-   - Final URL entry, share/Suno links, platform rollout board
-   - Export bundle button + release calendar placeholder
+6. ✅ Release tab (foundation)
+   - Final URL/share/Suno link forms wired to version state
+   - Release plan board with add/edit/remove + status updates
+   - Export bundle placeholder button ready for wiring
 
 ## Phase 6 · Dashboard & Reminders
-7. ☐ Dashboard overhaul
-   - Album progress badges, active reminders, upcoming releases
-   - Global tag library & quick links
+7. ✅ Dashboard overhaul (foundation)
+   - Summary cards, reminders, upcoming releases rendered above workspace
+   - Quick navigation shortcuts wired to workflow tabs
 
 ## Phase 7 · Polish & Migration
 8. ☐ Data migration / cleanup
