@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,7 +23,8 @@ import {
   Trash2,
   Wand2,
   PenSquare,
-  AlertTriangle
+  AlertTriangle,
+  Download
 } from "lucide-react";
 
 type PromptMode = "full" | "instrumental" | "addVocals" | "addInstrumentals";
@@ -95,6 +96,7 @@ type VersionRecord = {
   exportName?: string;
   masteringNotes?: string;
   exposeLog?: string;
+  spectrumNotes?: string;
   qaChecks: Record<string, boolean>;
   shareUrl?: string;
   sunoUrl?: string;
@@ -126,6 +128,110 @@ type ProjectRecord = {
   notes?: string;
   songs: SongRecord[];
 };
+
+type PromptSnapshotRecord = {
+  id: string;
+  label: string;
+  createdAt: string;
+  templateId?: string;
+  prompt: string;
+  lyrics?: string;
+  notes?: string;
+};
+
+type IterationTimelineEntry = {
+  id: string;
+  createdAt: string;
+  promptSnapshotId?: string;
+  promptSummary?: string;
+  sunoUrl?: string;
+  seed?: string;
+  notes?: string;
+  enhancements: string[];
+};
+
+type MasteringBandlabSettings = {
+  chainPreset?: string;
+  engine?: string;
+  intensity?: string;
+  inputGain?: string;
+  outputGain?: string;
+  focus?: string;
+  tape?: string;
+  notes?: string;
+};
+
+type ExposeMetricSummary = {
+  lufsIntegrated?: string;
+  lufsShort?: string;
+  truePeak?: string;
+  loudnessRange?: string;
+  crestFactor?: string;
+  status?: "ok" | "warning" | "issue";
+  notes?: string;
+};
+
+type VersionMasteringProfile = {
+  targetLufs?: string;
+  targetTruePeak?: string;
+  bandlab: MasteringBandlabSettings;
+  expose: ExposeMetricSummary;
+};
+
+type VersionWorkflowRecord = VersionRecord & {
+  promptSnapshots: PromptSnapshotRecord[];
+  promptHistory: string[];
+  iterationTimeline: IterationTimelineEntry[];
+  finalPromptId?: string;
+  finalLyricsId?: string;
+  finalReleaseUrl?: string;
+  masteringProfile: VersionMasteringProfile;
+};
+
+type SongWorkflowRecord = {
+  id: string;
+  albumId: string;
+  title: string;
+  createdAt: string;
+  status: WorkflowStatus;
+  presetId?: string;
+  tags: string[];
+  primaryPromptId?: string;
+  lyricBrief?: string;
+  briefNotes?: string;
+  references: string[];
+  versions: VersionWorkflowRecord[];
+  analyticsNotes?: string;
+  catalogNotes?: string;
+};
+
+type AlbumRecord = {
+  id: string;
+  name: string;
+  description?: string;
+  createdAt: string;
+  notes?: string;
+  releaseTargetDate?: string;
+  tags: string[];
+  songs: SongWorkflowRecord[];
+};
+
+type SongWorkflowTab = "brief" | "generation" | "mastering" | "release" | "analytics";
+
+type SongWorkflowTabDefinition = {
+  id: SongWorkflowTab;
+  label: string;
+  description: string;
+  icon: React.ComponentType<{ className?: string }>;
+};
+
+const SONG_WORKFLOW_TABS: SongWorkflowTabDefinition[] = [
+  { id: "brief", label: "Brief", description: "Templates, references, lyric handoff", icon: PenSquare },
+  { id: "generation", label: "Generation", description: "Seeds, variations, prompt snapshots", icon: Rocket },
+  { id: "mastering", label: "Mastering", description: "BandLab chain and QA targets", icon: Disc3 },
+  { id: "release", label: "Release", description: "SoundCloud + rollout tracking", icon: Share2 },
+  { id: "analytics", label: "Analytics", description: "Expose metrics & spectrum notes", icon: ClipboardList }
+];
 
 const META_TAGS = [
   "high_fidelity",
@@ -397,6 +503,330 @@ function makeId() {
     : `id_${Math.random().toString(36).slice(2)}_${Date.now().toString(36)}`;
 }
 
+function deepEqual<T>(a: T, b: T) {
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
+}
+
+function buildDefaultMasteringProfile(version: VersionRecord): VersionMasteringProfile {
+  return {
+    targetLufs: version.lufs || undefined,
+    targetTruePeak: version.truePeak || undefined,
+    bandlab: {
+      notes: version.masteringNotes || undefined
+    },
+    expose: {
+      lufsIntegrated: version.lufs || undefined,
+      truePeak: version.truePeak || undefined,
+      notes: version.exposeLog || undefined
+    }
+  };
+}
+
+function convertLegacyVersion(version: VersionRecord): VersionWorkflowRecord {
+  const promptSnapshot: PromptSnapshotRecord | undefined = version.prompt
+    ? {
+        id: `legacy_prompt_${version.id}`,
+        label: "Legacy Prompt Import",
+        createdAt: version.createdAt,
+        prompt: version.prompt,
+        lyrics: version.lyrics,
+        notes: version.iterationPlan ? `Legacy iteration plan: ${version.iterationPlan}` : undefined
+      }
+    : undefined;
+
+  return {
+    ...version,
+    promptSnapshots: promptSnapshot ? [promptSnapshot] : [],
+    promptHistory: version.prompt ? [version.prompt] : [],
+    iterationTimeline: [],
+    finalPromptId: promptSnapshot?.id,
+    finalLyricsId: version.lyrics ? promptSnapshot?.id : undefined,
+    finalReleaseUrl: version.soundcloudUrl || version.shareUrl || undefined,
+    masteringProfile: buildDefaultMasteringProfile(version)
+  };
+}
+
+function convertLegacySong(song: SongRecord, albumId: string, createdAt: string): SongWorkflowRecord {
+  return {
+    id: song.id,
+    albumId,
+    title: song.title,
+    createdAt,
+    status: song.status,
+    presetId: undefined,
+    tags: [],
+    references: song.references,
+    versions: song.versions.map(convertLegacyVersion),
+    lyricBrief: song.notes,
+    briefNotes: song.notes,
+    analyticsNotes: undefined,
+    catalogNotes: song.notes
+  };
+}
+
+function convertLegacyProjectsToAlbums(projects: ProjectRecord[]): AlbumRecord[] {
+  return projects.map(project => {
+    const createdAt = project.createdAt || new Date(0).toISOString();
+    return {
+      id: project.id,
+      name: project.name,
+      description: project.description,
+      createdAt,
+      notes: project.notes,
+      releaseTargetDate: undefined,
+      tags: [],
+      songs: project.songs.map(song => convertLegacySong(song, project.id, createdAt))
+    };
+  });
+}
+
+function slugify(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 60) || "bundle";
+}
+
+function downloadTextFile(filename: string, content: string) {
+  if (typeof window === "undefined") return;
+  const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
+
+function resolveFinalPrompt(version: VersionWorkflowRecord) {
+  const finalSnapshot = version.finalPromptId
+    ? version.promptSnapshots.find(snapshot => snapshot.id === version.finalPromptId)
+    : undefined;
+  const fallbackSnapshot = finalSnapshot ?? version.promptSnapshots[version.promptSnapshots.length - 1];
+  const prompt = finalSnapshot?.prompt ?? version.prompt ?? fallbackSnapshot?.prompt ?? "";
+  const lyrics = finalSnapshot?.lyrics ?? version.lyrics ?? fallbackSnapshot?.lyrics ?? "";
+  const snapshotLabel = finalSnapshot?.label ?? fallbackSnapshot?.label;
+  return { prompt, lyrics, snapshotLabel };
+}
+
+function formatDateIso(value?: string) {
+  if (!value) return "N/A";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toISOString();
+}
+
+function buildExportBundle(album: AlbumRecord, song: SongWorkflowRecord, version: VersionWorkflowRecord) {
+  const { prompt, lyrics, snapshotLabel } = resolveFinalPrompt(version);
+  const qa = getQaSummary(version.qaChecks);
+  const health = deriveVersionHealth(version);
+  const metaTagsLine = version.metaTags.map(tag => `[${tag}]`).join(" ");
+  const baseSlug = `${slugify(album.name || "album")}_${slugify(song.title || "song")}_${slugify(version.label || "version")}`;
+
+  const promptContent = prompt || "// No prompt captured for this version.";
+  const lyricsContent = lyrics || "// No lyrics captured for this version.";
+
+  const metaSections = [
+    `Album: ${album.name}`,
+    `Song: ${song.title}`,
+    `Version: ${version.label}`,
+    `Created: ${formatDateIso(version.createdAt)}`,
+    `Status: ${version.status}`,
+    `Seed: ${version.seed || "n/a"}`,
+    `BPM: ${version.bpm || "n/a"}`,
+    `Key: ${version.key || "n/a"}`,
+    `Meta Tags: ${metaTagsLine || "n/a"}`,
+    `Exclude: ${version.exclude || "n/a"}`,
+    `Final Prompt Snapshot: ${snapshotLabel || "n/a"}`,
+    `QA Completed: ${qa.completed}/${qa.total}`
+  ];
+
+  const metaContent = metaSections.join("\n");
+
+  const lines: string[] = [];
+  lines.push(`# ${song.title} — ${version.label}`);
+  lines.push(`Album: ${album.name}`);
+  lines.push(`Created: ${formatDateIso(version.createdAt)}`);
+  lines.push(`Status: ${version.status}`);
+  lines.push(`Seed: ${version.seed || "n/a"}`);
+  lines.push(`BPM / Key: ${(version.bpm || "n/a")} / ${(version.key || "n/a")}`);
+  lines.push(`Final Release URL: ${version.finalReleaseUrl || "n/a"}`);
+  lines.push(`Share URL: ${version.shareUrl || "n/a"}`);
+  lines.push(`Suno URL: ${version.sunoUrl || "n/a"}`);
+  lines.push(`SoundCloud URL: ${version.soundcloudUrl || "n/a"}`);
+  lines.push("");
+
+  lines.push(`QA Checks: ${qa.completed}/${qa.total}${qa.pending.length ? ` (pending: ${qa.pending.join(", ")})` : ""}`);
+  lines.push(`Expose Status: ${health.exposeStatus || "n/a"}`);
+  lines.push(`Measured LUFS: ${health.lufs ?? "n/a"}`);
+  lines.push(`Measured True Peak: ${health.truePeak ?? "n/a"}`);
+  lines.push("");
+
+  if (song.references.length) {
+    lines.push("## References");
+    song.references.forEach(ref => lines.push(`- ${ref}`));
+    lines.push("");
+  }
+
+  if (version.iterationTimeline.length) {
+    lines.push("## Iteration Timeline");
+    version.iterationTimeline.forEach(entry => {
+      const entryDate = formatDateIso(entry.createdAt);
+      const summary = entry.promptSummary || "Prompt adjustment";
+      const enhancements = entry.enhancements.length ? ` (Enhancements: ${entry.enhancements.join(", ")})` : "";
+      const sunoLink = entry.sunoUrl ? ` [Suno](${entry.sunoUrl})` : "";
+      lines.push(`- ${entryDate} — ${summary}${enhancements}${sunoLink}`);
+      if (entry.notes) {
+        lines.push(`  - Notes: ${entry.notes}`);
+      }
+    });
+    lines.push("");
+  }
+
+  lines.push("## Mastering");
+  const bandlab = version.masteringProfile.bandlab;
+  lines.push(`Target LUFS: ${version.masteringProfile.targetLufs || "n/a"}`);
+  lines.push(`Target True Peak: ${version.masteringProfile.targetTruePeak || "n/a"}`);
+  lines.push(`Actual LUFS: ${version.lufs || "n/a"}`);
+  lines.push(`Actual True Peak: ${version.truePeak || "n/a"}`);
+  lines.push("### BandLab Chain");
+  Object.entries(bandlab).forEach(([key, value]) => {
+    if (value) {
+      lines.push(`- ${key}: ${value}`);
+    }
+  });
+  if (!Object.values(bandlab).some(Boolean)) {
+    lines.push("- n/a");
+  }
+  const expose = version.masteringProfile.expose;
+  lines.push("### EXPOSE");
+  Object.entries(expose).forEach(([key, value]) => {
+    if (value) {
+      lines.push(`- ${key}: ${value}`);
+    }
+  });
+  if (!Object.values(expose).some(Boolean)) {
+    lines.push("- n/a");
+  }
+  if (version.masteringNotes) {
+    lines.push("### Mastering Notes");
+    lines.push(version.masteringNotes);
+  }
+  if (version.exposeLog) {
+    lines.push("### EXPOSE Log");
+    lines.push("```");
+    lines.push(version.exposeLog);
+    lines.push("```");
+  }
+  lines.push("");
+
+  lines.push("## Spectrum & Analytics");
+  lines.push(`Song Analytics Notes: ${song.analyticsNotes || "n/a"}`);
+  lines.push(`Version Spectrum Notes: ${version.spectrumNotes || "n/a"}`);
+  lines.push("");
+
+  lines.push("## Release Plan");
+  if (version.releasePlans.length) {
+    lines.push("| Platform | Status | Release Date | URL | Notes |");
+    lines.push("| --- | --- | --- | --- | --- |");
+    version.releasePlans.forEach(plan => {
+      lines.push(`| ${plan.platform} | ${plan.status} | ${plan.releaseDate || ""} | ${plan.url || ""} | ${(plan.notes || "").replace(/\n/g, " ")} |`);
+    });
+  } else {
+    lines.push("No release entries recorded.");
+  }
+
+  const notesContent = lines.join("\n");
+
+  return {
+    baseSlug,
+    files: {
+      [`${baseSlug}_PROMPT.txt`]: promptContent,
+      [`${baseSlug}_LYRICS.txt`]: lyricsContent,
+      [`${baseSlug}_META.txt`]: metaContent,
+      [`${baseSlug}_NOTES.md`]: notesContent
+    }
+  };
+}
+function extractLatestVersionValues(song: SongWorkflowRecord) {
+  const latest = song.versions[song.versions.length - 1];
+  return {
+    bpm: latest?.bpm,
+    key: latest?.key,
+    status: latest?.status ?? song.status
+  };
+}
+
+function downgradeVersionToLegacy(version: VersionWorkflowRecord): VersionRecord {
+  const finalSnapshot = version.finalPromptId
+    ? version.promptSnapshots.find(snapshot => snapshot.id === version.finalPromptId)
+    : undefined;
+  const fallbackSnapshot = finalSnapshot ?? version.promptSnapshots[version.promptSnapshots.length - 1];
+
+  return {
+    id: version.id,
+    songId: version.songId,
+    label: version.label,
+    seed: version.seed,
+    bpm: version.bpm ?? fallbackSnapshot?.prompt.match(/Tempo=(\d+)/)?.[1],
+    key: version.key,
+    duration: version.duration,
+    structureNotes: version.structureNotes,
+    prompt: version.prompt ?? fallbackSnapshot?.prompt,
+    exclude: version.exclude,
+    metaTags: version.metaTags,
+    lyricTags: version.lyricTags,
+    lyrics: version.lyrics ?? finalSnapshot?.lyrics ?? fallbackSnapshot?.lyrics,
+    iterationPlan: version.iterationPlan,
+    notes: version.notes,
+    lufs: version.lufs ?? version.masteringProfile.expose.lufsIntegrated,
+    truePeak: version.truePeak ?? version.masteringProfile.expose.truePeak,
+    exportName: version.exportName,
+    masteringNotes: version.masteringNotes ?? version.masteringProfile.bandlab.notes,
+    exposeLog: version.exposeLog ?? version.masteringProfile.expose.notes,
+    spectrumNotes: version.spectrumNotes,
+    qaChecks: version.qaChecks,
+    shareUrl: version.shareUrl,
+    sunoUrl: version.sunoUrl,
+    soundcloudUrl: version.soundcloudUrl ?? version.finalReleaseUrl,
+    createdAt: version.createdAt,
+    status: version.status,
+    takes: version.takes,
+    releasePlans: version.releasePlans
+  };
+}
+
+function convertAlbumsToLegacyProjects(albums: AlbumRecord[]): ProjectRecord[] {
+  return albums.map(album => ({
+    id: album.id,
+    name: album.name,
+    description: album.description,
+    createdAt: album.createdAt,
+    notes: album.notes,
+    songs: album.songs.map(song => {
+      const latest = extractLatestVersionValues(song);
+      return {
+        id: song.id,
+        projectId: album.id,
+        title: song.title,
+        bpm: latest.bpm,
+        key: latest.key,
+        structure: song.catalogNotes,
+        status: latest.status,
+        references: song.references,
+        notes: song.catalogNotes ?? song.briefNotes,
+        versions: song.versions.map(downgradeVersionToLegacy)
+      };
+    })
+  }));
+}
+
 async function safeCopyText(value: string) {
   if (!value) return;
   try {
@@ -482,11 +912,34 @@ export default function SunoMagixLike() {
   const [promptForm, setPromptForm] = useLocalStorageState<PromptForm>("suno_prompt_form_v2", DEFAULT_PROMPT_FORM);
   const [selectedMetaTags, setSelectedMetaTags] = useLocalStorageState<string[]>("suno_meta_tags_v2", DEFAULT_META_SELECTION);
   const [projects, setProjects] = useLocalStorageState<ProjectRecord[]>("suno_projects_v2", []);
+  const [libraryAlbums, setLibraryAlbums] = useLocalStorageState<AlbumRecord[]>("suno_library_v1", []);
   const [checklistState, setChecklistState] = useLocalStorageState<Record<string, boolean>>("suno_checklists_v2", {});
 
   const [selectedProjectId, setSelectedProjectId] = useState<string>("");
   const [selectedSongId, setSelectedSongId] = useState<string>("");
   const [selectedVersionId, setSelectedVersionId] = useState<string>("");
+
+  const [selectedAlbumId, setSelectedAlbumId] = useState<string>("");
+  const [selectedLibrarySongId, setSelectedLibrarySongId] = useState<string>("");
+  const [activeWorkflowTab, setActiveWorkflowTab] = useState<SongWorkflowTab>("brief");
+
+  const [promptSnapshotVersionId, setPromptSnapshotVersionId] = useState<string>("");
+  const [promptSnapshotDraft, setPromptSnapshotDraft] = useState({
+    label: "",
+    prompt: "",
+    lyrics: "",
+    notes: "",
+    markFinal: false
+  });
+  const [iterationDraft, setIterationDraft] = useState({
+    versionId: "",
+    summary: "",
+    sunoUrl: "",
+    seed: "",
+    enhancements: "",
+    notes: ""
+  });
+  const [exportVersionId, setExportVersionId] = useState<string>("");
 
   const [projectDraftName, setProjectDraftName] = useState<string>("");
   const [projectDraftNotes, setProjectDraftNotes] = useState<string>("");
@@ -495,6 +948,1295 @@ export default function SunoMagixLike() {
   const [versionDraft, setVersionDraft] = useState({ ...versionDraftTemplate });
   const [takeDraft, setTakeDraft] = useState({ ...takeDraftTemplate });
   const [releaseDraft, setReleaseDraft] = useState({ ...releaseDraftTemplate });
+
+  const updateProjectsState = useCallback((updater: (projects: ProjectRecord[]) => ProjectRecord[]) => {
+    setProjects(prev => {
+      const next = updater(prev);
+      setLibraryAlbums(convertLegacyProjectsToAlbums(next));
+      return next;
+    });
+  }, [setProjects, setLibraryAlbums]);
+
+  const updateLibraryState = useCallback((updater: (albums: AlbumRecord[]) => AlbumRecord[]) => {
+    setLibraryAlbums(prev => {
+      const next = updater(prev);
+      setProjects(convertAlbumsToLegacyProjects(next));
+      return next;
+    });
+  }, [setLibraryAlbums, setProjects]);
+
+  useEffect(() => {
+    if (libraryAlbums.length === 0 && projects.length > 0) {
+      setLibraryAlbums(convertLegacyProjectsToAlbums(projects));
+    }
+  }, [projects, libraryAlbums.length, setLibraryAlbums]);
+
+  const libraryStats = useMemo(() => {
+    const albumCount = libraryAlbums.length;
+    const songCount = libraryAlbums.reduce((total, album) => total + album.songs.length, 0);
+    const versionCount = libraryAlbums.reduce(
+      (total, album) => total + album.songs.reduce((songTotal, song) => songTotal + song.versions.length, 0),
+      0
+    );
+    const albumSummaries = libraryAlbums.map(album => deriveAlbumHeadline(album));
+    const albumStatusCounts = {
+      ready: albumSummaries.filter(summary => summary.status === "healthy").length,
+      inProgress: albumSummaries.filter(summary => summary.status === "pending").length,
+      attention: albumSummaries.filter(summary => summary.status === "issue").length,
+      empty: albumSummaries.filter(summary => summary.status === "no-songs").length
+    };
+    return { albumCount, songCount, versionCount, albumStatusCounts };
+  }, [libraryAlbums]);
+
+  useEffect(() => {
+    if (!libraryAlbums.length) {
+      if (selectedAlbumId) setSelectedAlbumId("");
+      if (selectedLibrarySongId) setSelectedLibrarySongId("");
+      return;
+    }
+
+    const currentAlbum = libraryAlbums.find(album => album.id === selectedAlbumId) ?? libraryAlbums[0];
+    if (currentAlbum.id !== selectedAlbumId) {
+      setSelectedAlbumId(currentAlbum.id);
+      const firstSongId = currentAlbum.songs[0]?.id ?? "";
+      setSelectedLibrarySongId(firstSongId);
+      return;
+    }
+
+    if (!currentAlbum.songs.length) {
+      if (selectedLibrarySongId) setSelectedLibrarySongId("");
+      return;
+    }
+
+    const currentSong = currentAlbum.songs.find(song => song.id === selectedLibrarySongId) ?? currentAlbum.songs[0];
+    if (currentSong.id !== selectedLibrarySongId) {
+      setSelectedLibrarySongId(currentSong.id);
+    }
+  }, [libraryAlbums, selectedAlbumId, selectedLibrarySongId]);
+
+  const selectedAlbum = useMemo(() => {
+    return libraryAlbums.find(album => album.id === selectedAlbumId);
+  }, [libraryAlbums, selectedAlbumId]);
+
+  const selectedLibrarySong = useMemo(() => {
+    if (!selectedAlbum) return undefined;
+    return selectedAlbum.songs.find(song => song.id === selectedLibrarySongId);
+  }, [selectedAlbum, selectedLibrarySongId]);
+
+  useEffect(() => {
+    if (selectedLibrarySong?.versions.length) {
+      const latestVersionId = selectedLibrarySong.versions[selectedLibrarySong.versions.length - 1].id;
+      setPromptSnapshotVersionId(latestVersionId);
+      setIterationDraft(draft => ({ ...draft, versionId: latestVersionId }));
+      setExportVersionId(latestVersionId);
+    } else {
+      setPromptSnapshotVersionId("");
+      setIterationDraft(draft => ({ ...draft, versionId: "" }));
+      setExportVersionId("");
+    }
+    setPromptSnapshotDraft({ label: "", prompt: "", lyrics: "", notes: "", markFinal: false });
+  }, [selectedAlbumId, selectedLibrarySongId, selectedLibrarySong?.versions.length]);
+
+  const mutateSelectedSong = useCallback((mutator: (song: SongWorkflowRecord) => SongWorkflowRecord) => {
+    if (!selectedAlbumId || !selectedLibrarySongId) return;
+    updateLibraryState(albums => albums.map(album => {
+      if (album.id !== selectedAlbumId) return album;
+      return {
+        ...album,
+        songs: album.songs.map(song => song.id === selectedLibrarySongId ? mutator(song) : song)
+      };
+    }));
+  }, [selectedAlbumId, selectedLibrarySongId, updateLibraryState]);
+
+  const mutateVersion = useCallback((versionId: string, mutator: (version: VersionWorkflowRecord) => VersionWorkflowRecord) => {
+    mutateSelectedSong(song => ({
+      ...song,
+      versions: song.versions.map(version => version.id === versionId ? mutator(version) : version)
+    }));
+  }, [mutateSelectedSong]);
+
+  const updateSongField = useCallback(<K extends keyof SongWorkflowRecord>(key: K, value: SongWorkflowRecord[K]) => {
+    mutateSelectedSong(song => ({ ...song, [key]: value }));
+  }, [mutateSelectedSong]);
+
+  const addPromptSnapshot = useCallback(() => {
+    if (!selectedLibrarySong || !promptSnapshotVersionId || !promptSnapshotDraft.prompt.trim()) return;
+    const snapshotId = makeId();
+    const snapshot: PromptSnapshotRecord = {
+      id: snapshotId,
+      label: promptSnapshotDraft.label.trim() || `Snapshot ${new Date().toLocaleString()}`,
+      createdAt: new Date().toISOString(),
+      templateId: selectedLibrarySong.presetId,
+      prompt: promptSnapshotDraft.prompt.trim(),
+      lyrics: promptSnapshotDraft.lyrics.trim() || undefined,
+      notes: promptSnapshotDraft.notes.trim() || undefined
+    };
+
+    mutateVersion(promptSnapshotVersionId, version => {
+      const updatedHistory = version.promptHistory.includes(snapshot.prompt)
+        ? version.promptHistory
+        : [...version.promptHistory, snapshot.prompt];
+      return {
+        ...version,
+        promptSnapshots: [...version.promptSnapshots, snapshot],
+        promptHistory: updatedHistory,
+        finalPromptId: promptSnapshotDraft.markFinal ? snapshotId : version.finalPromptId,
+        finalLyricsId: promptSnapshotDraft.lyrics.trim() && promptSnapshotDraft.markFinal ? snapshotId : version.finalLyricsId,
+        prompt: snapshot.prompt,
+        lyrics: snapshot.lyrics ?? version.lyrics
+      };
+    });
+
+    if (promptSnapshotDraft.markFinal) {
+      mutateSelectedSong(song => ({
+        ...song,
+        primaryPromptId: snapshotId
+      }));
+    }
+
+    setPromptSnapshotDraft({ label: "", prompt: "", lyrics: "", notes: "", markFinal: false });
+  }, [mutateVersion, mutateSelectedSong, promptSnapshotDraft, promptSnapshotVersionId, selectedLibrarySong]);
+
+  const setFinalPromptSnapshot = useCallback((versionId: string, snapshotId: string) => {
+    mutateVersion(versionId, version => ({
+      ...version,
+      finalPromptId: snapshotId,
+      finalLyricsId: snapshotId
+    }));
+    mutateSelectedSong(song => ({
+      ...song,
+      primaryPromptId: snapshotId
+    }));
+  }, [mutateVersion, mutateSelectedSong]);
+
+  const addIterationEntry = useCallback(() => {
+    if (!selectedLibrarySong || !iterationDraft.versionId) return;
+    if (!iterationDraft.summary.trim() && !iterationDraft.sunoUrl.trim()) return;
+
+    const entry: IterationTimelineEntry = {
+      id: makeId(),
+      createdAt: new Date().toISOString(),
+      promptSnapshotId: selectedLibrarySong.primaryPromptId,
+      promptSummary: iterationDraft.summary.trim() || undefined,
+      sunoUrl: iterationDraft.sunoUrl.trim() || undefined,
+      seed: iterationDraft.seed.trim() || undefined,
+      notes: iterationDraft.notes.trim() || undefined,
+      enhancements: iterationDraft.enhancements
+        .split(",")
+        .map(item => item.trim())
+        .filter(Boolean)
+    };
+
+    mutateVersion(iterationDraft.versionId, version => ({
+      ...version,
+      iterationTimeline: [...version.iterationTimeline, entry]
+    }));
+
+    setIterationDraft(draft => ({ ...draft, summary: "", sunoUrl: "", seed: "", enhancements: "", notes: "" }));
+  }, [iterationDraft, mutateVersion, selectedLibrarySong]);
+
+  const removeIterationEntry = useCallback((versionId: string, entryId: string) => {
+    mutateVersion(versionId, version => ({
+      ...version,
+      iterationTimeline: version.iterationTimeline.filter(entry => entry.id !== entryId)
+    }));
+  }, [mutateVersion]);
+
+  const formatCommaList = (values?: string[]) => (values && values.length ? values.join(", ") : "");
+  const parseCommaList = (value: string) => value.split(",").map(item => item.trim()).filter(Boolean);
+  const formatLines = (values?: string[]) => (values && values.length ? values.join("\n") : "");
+const parseLines = (value: string) => value.split(/\n+/).map(item => item.trim()).filter(Boolean);
+
+const parseNumeric = (value?: string) => {
+  if (!value) return null;
+  const match = value.match(/-?\d+(?:\.\d+)?/);
+  return match ? Number(match[0]) : null;
+};
+
+const QA_STATUS_LABELS: Record<string, string> = {
+  prompt_clean: "Prompt clean",
+  lyrics_clean: "Lyrics clean",
+  meta_tags_applied: "Meta tags applied",
+  expose_run: "Expose run",
+  release_logged: "Release logged"
+};
+
+function getQaSummary(qaChecks: Record<string, boolean>) {
+  const entries = Object.entries(qaChecks);
+  const total = entries.length;
+  const completed = entries.filter(([, checked]) => checked).length;
+  const pending = entries.filter(([, checked]) => !checked).map(([key]) => key);
+  return {
+    total,
+    completed,
+    pending,
+    allDone: pending.length === 0
+  };
+}
+
+function deriveVersionHealth(version: VersionWorkflowRecord) {
+  const qa = getQaSummary(version.qaChecks);
+  const exposeStatus = version.masteringProfile.expose.status ?? "";
+  const lufs = parseNumeric(version.lufs ?? version.masteringProfile.expose.lufsIntegrated);
+  const truePeak = parseNumeric(version.truePeak ?? version.masteringProfile.expose.truePeak);
+  const lufsOutOfRange = lufs === null ? false : lufs < -14 || lufs > -10;
+  const truePeakOutOfRange = truePeak === null ? false : truePeak > -0.8 || truePeak < -3;
+  const missingFinalUrl = !version.finalReleaseUrl;
+  const exposeIssue = exposeStatus === "issue";
+  const exposeWarning = exposeStatus === "warning";
+  const hasIssues = !qa.allDone || exposeIssue || missingFinalUrl || lufsOutOfRange || truePeakOutOfRange;
+  return {
+    qa,
+    exposeStatus,
+    lufs,
+    truePeak,
+    lufsOutOfRange,
+    truePeakOutOfRange,
+    missingFinalUrl,
+    exposeIssue,
+    exposeWarning,
+    hasIssues
+  };
+}
+
+function deriveSongHeadline(song: SongWorkflowRecord) {
+  if (!song.versions.length) {
+    return {
+      status: "no-versions",
+      badgeText: "No versions",
+      badgeClass: "bg-zinc-800 text-zinc-300"
+    };
+  }
+  const latest = song.versions[song.versions.length - 1];
+  const health = deriveVersionHealth(latest);
+  if (!health.hasIssues) {
+    return {
+      status: "healthy",
+      badgeText: "Ready",
+      badgeClass: "bg-emerald-600/80 text-emerald-100"
+    };
+  }
+  if (health.exposeIssue || health.missingFinalUrl) {
+    return {
+      status: "issue",
+      badgeText: "Needs attention",
+      badgeClass: "bg-rose-600/70 text-rose-100"
+    };
+  }
+  return {
+    status: "pending",
+    badgeText: "In progress",
+    badgeClass: "bg-amber-500/70 text-amber-100"
+  };
+}
+
+function deriveAlbumHeadline(album: AlbumRecord) {
+  if (!album.songs.length) {
+    return {
+      status: "no-songs",
+      badgeText: "Empty",
+      badgeClass: "bg-zinc-800 text-zinc-300",
+      songCounts: {
+        healthy: 0,
+        pending: 0,
+        issue: 0,
+        empty: 0
+      }
+    };
+  }
+
+  const summaries = album.songs.map(deriveSongHeadline);
+  const songCounts = {
+    healthy: summaries.filter(summary => summary.status === "healthy").length,
+    pending: summaries.filter(summary => summary.status === "pending").length,
+    issue: summaries.filter(summary => summary.status === "issue").length,
+    empty: summaries.filter(summary => summary.status === "no-versions").length
+  };
+
+  if (songCounts.issue > 0) {
+    return {
+      status: "issue",
+      badgeText: "Needs attention",
+      badgeClass: "bg-rose-600/70 text-rose-100",
+      songCounts
+    };
+  }
+  if (songCounts.pending > 0 || songCounts.empty > 0) {
+    return {
+      status: "pending",
+      badgeText: "In progress",
+      badgeClass: "bg-amber-500/70 text-amber-100",
+      songCounts
+    };
+  }
+  return {
+    status: "healthy",
+    badgeText: "Ready",
+    badgeClass: "bg-emerald-600/80 text-emerald-100",
+    songCounts
+  };
+}
+
+  const updateVersionSimpleField = useCallback(<K extends keyof VersionWorkflowRecord>(versionId: string, key: K, value: VersionWorkflowRecord[K]) => {
+    mutateVersion(versionId, version => ({ ...version, [key]: value }));
+  }, [mutateVersion]);
+
+  const updateMasteringProfile = useCallback((versionId: string, updater: (profile: VersionMasteringProfile) => VersionMasteringProfile) => {
+    mutateVersion(versionId, version => ({
+      ...version,
+      masteringProfile: updater(version.masteringProfile)
+    }));
+  }, [mutateVersion]);
+
+  const updateBandlabField = useCallback((versionId: string, key: keyof MasteringBandlabSettings, value: string) => {
+    updateMasteringProfile(versionId, profile => ({
+      ...profile,
+      bandlab: {
+        ...profile.bandlab,
+        [key]: value.trim() ? value : undefined
+      }
+    }));
+  }, [updateMasteringProfile]);
+
+  const updateExposeField = useCallback((versionId: string, key: keyof ExposeMetricSummary, value: string) => {
+    updateMasteringProfile(versionId, profile => ({
+      ...profile,
+      expose: {
+        ...profile.expose,
+        [key]: value.trim() ? value : undefined
+      }
+    }));
+  }, [updateMasteringProfile]);
+
+  const toggleVersionQaCheck = useCallback((versionId: string, itemId: string) => {
+    mutateVersion(versionId, version => ({
+      ...version,
+      qaChecks: {
+        ...version.qaChecks,
+        [itemId]: !version.qaChecks[itemId]
+      }
+    }));
+  }, [mutateVersion]);
+
+  const handleExportBundle = useCallback(() => {
+    if (!selectedAlbum || !selectedLibrarySong || !selectedLibrarySong.versions.length) {
+      window?.alert?.("No song/version available for export.");
+      return;
+    }
+    const targetVersion = exportVersionId
+      ? selectedLibrarySong.versions.find(version => version.id === exportVersionId)
+      : selectedLibrarySong.versions[selectedLibrarySong.versions.length - 1];
+    if (!targetVersion) {
+      window?.alert?.("Selected version not found for export.");
+      return;
+    }
+    const bundle = buildExportBundle(selectedAlbum, selectedLibrarySong, targetVersion);
+    Object.entries(bundle.files).forEach(([filename, content]) => {
+      downloadTextFile(filename, content);
+    });
+  }, [exportVersionId, selectedAlbum, selectedLibrarySong]);
+
+  const formatDate = (value?: string) => {
+    if (!value) return "–";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleString();
+  };
+
+  const renderSongWorkflowContent = () => {
+    if (!selectedLibrarySong) {
+      return <p className="text-sm text-zinc-500">Select an album and song to explore the end-to-end workflow.</p>;
+    }
+
+    const versions = selectedLibrarySong.versions;
+    const promptSnapshots = versions.flatMap(version =>
+      version.promptSnapshots.map(snapshot => ({ version, snapshot }))
+    );
+    const timelineEntries = versions.flatMap(version =>
+      version.iterationTimeline.map(entry => ({ version, entry }))
+    );
+
+    switch (activeWorkflowTab) {
+      case "brief": {
+        return (
+          <div className="space-y-4">
+            <Card className="bg-zinc-900/60 border-zinc-800">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-violet-200">
+                  <PenSquare className="w-4 h-4" /> Song Brief Setup
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="text-sm text-zinc-300 space-y-4">
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-xs uppercase tracking-wide text-zinc-500">Preset Template</label>
+                    <select
+                      value={selectedLibrarySong.presetId || ""}
+                      onChange={e => updateSongField("presetId", e.target.value || undefined)}
+                      className="bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100"
+                    >
+                      <option value="">No preset</option>
+                      {SOUND_BIBLE_TEMPLATES.map(template => (
+                        <option key={template.id} value={template.id}>{template.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs uppercase tracking-wide text-zinc-500">Tags</label>
+                    <Input
+                      value={formatCommaList(selectedLibrarySong.tags)}
+                      onChange={e => updateSongField("tags", parseCommaList(e.target.value))}
+                      placeholder="industrial, cyberpunk, anthem"
+                      className="bg-zinc-950 border-zinc-800"
+                    />
+                    <div className="text-[11px] text-zinc-500">Comma-separated; used for filtering and catalog context.</div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs uppercase tracking-wide text-zinc-500">References</label>
+                    <Textarea
+                      value={formatLines(selectedLibrarySong.references)}
+                      onChange={e => updateSongField("references", parseLines(e.target.value))}
+                      rows={3}
+                      className="bg-zinc-950 border-zinc-800"
+                      placeholder="Reference 1\nReference 2"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs uppercase tracking-wide text-zinc-500">Lyric Brief / ChatGPT Notes</label>
+                    <Textarea
+                      value={selectedLibrarySong.lyricBrief || ""}
+                      onChange={e => updateSongField("lyricBrief", e.target.value || undefined)}
+                      rows={3}
+                      className="bg-zinc-950 border-zinc-800"
+                      placeholder="Paste the lyric outline or merged prompt returned by GPT."
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs uppercase tracking-wide text-zinc-500">Brief Notes</label>
+                  <Textarea
+                    value={selectedLibrarySong.briefNotes || ""}
+                    onChange={e => updateSongField("briefNotes", e.target.value || undefined)}
+                    rows={3}
+                    className="bg-zinc-950 border-zinc-800"
+                    placeholder="Any additional constraints or context for this song."
+                  />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-zinc-900/60 border-zinc-800">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-violet-200">
+                  <Sparkles className="w-4 h-4" /> Capture Prompt Snapshot
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4 text-sm text-zinc-300">
+                <div className="grid md:grid-cols-3 gap-3">
+                  <div className="space-y-2">
+                    <label className="text-xs uppercase tracking-wide text-zinc-500">Version</label>
+                    <select
+                      value={promptSnapshotVersionId}
+                      onChange={e => setPromptSnapshotVersionId(e.target.value)}
+                      className="bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100"
+                    >
+                      <option value="">Select version</option>
+                      {versions.map(version => (
+                        <option key={version.id} value={version.id}>{version.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs uppercase tracking-wide text-zinc-500">Label</label>
+                    <Input
+                      value={promptSnapshotDraft.label}
+                      onChange={e => setPromptSnapshotDraft(draft => ({ ...draft, label: e.target.value }))}
+                      placeholder="Prompt title"
+                      className="bg-zinc-950 border-zinc-800"
+                    />
+                  </div>
+                  <div className="flex items-end gap-2">
+                    <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-zinc-500">
+                      <input
+                        type="checkbox"
+                        className="accent-violet-600"
+                        checked={promptSnapshotDraft.markFinal}
+                        onChange={e => setPromptSnapshotDraft(draft => ({ ...draft, markFinal: e.target.checked }))}
+                      />
+                      Mark as final prompt
+                    </label>
+                  </div>
+                </div>
+                <div className="grid md:grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <label className="text-xs uppercase tracking-wide text-zinc-500">Style Prompt</label>
+                    <Textarea
+                      value={promptSnapshotDraft.prompt}
+                      onChange={e => setPromptSnapshotDraft(draft => ({ ...draft, prompt: e.target.value }))}
+                      rows={8}
+                      className="bg-zinc-950 border-zinc-800"
+                      placeholder="Paste the structured style prompt ready for Suno."
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs uppercase tracking-wide text-zinc-500">Lyrics / Notes</label>
+                    <Textarea
+                      value={promptSnapshotDraft.lyrics}
+                      onChange={e => setPromptSnapshotDraft(draft => ({ ...draft, lyrics: e.target.value }))}
+                      rows={8}
+                      className="bg-zinc-950 border-zinc-800"
+                      placeholder="Paste GPT-generated lyrics or merged prompt text."
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs uppercase tracking-wide text-zinc-500">Snapshot Notes</label>
+                  <Textarea
+                    value={promptSnapshotDraft.notes}
+                    onChange={e => setPromptSnapshotDraft(draft => ({ ...draft, notes: e.target.value }))}
+                    rows={3}
+                    className="bg-zinc-950 border-zinc-800"
+                    placeholder="Document why this prompt works, directives used, etc."
+                  />
+                </div>
+                <div>
+                  <Button
+                    disabled={!promptSnapshotVersionId || !promptSnapshotDraft.prompt.trim()}
+                    onClick={addPromptSnapshot}
+                    className="bg-violet-600 hover:bg-violet-500 text-white"
+                  >
+                    <Sparkles className="w-4 h-4 mr-2" /> Save Snapshot
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="bg-zinc-900/60 border-zinc-800">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-violet-200">
+                  <BookOpen className="w-4 h-4" /> Prompt Snapshots
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="text-sm text-zinc-300 space-y-3">
+                {promptSnapshots.length === 0 ? (
+                  <p className="text-xs text-zinc-500">Snapshots will appear once prompts are stored against versions.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {promptSnapshots.map(({ version, snapshot }) => (
+                      <div key={snapshot.id} className="rounded border border-zinc-800 bg-zinc-950/60 p-3 space-y-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-500">
+                          <span className="font-medium text-zinc-200">{snapshot.label}</span>
+                          <span>{formatDate(snapshot.createdAt)}</span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-3 text-[11px] text-zinc-400">
+                          <span>Version {version.label}</span>
+                          {version.finalPromptId === snapshot.id && <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-violet-900/40 text-violet-200">Final</span>}
+                        </div>
+                        <pre className="mt-1 text-[11px] leading-relaxed whitespace-pre-wrap text-zinc-300 bg-zinc-950/80 p-2 rounded">
+                          {snapshot.prompt}
+                        </pre>
+                        {snapshot.lyrics && (
+                          <pre className="text-[11px] leading-relaxed whitespace-pre-wrap text-zinc-400 bg-zinc-950/80 p-2 rounded">
+                            {snapshot.lyrics}
+                          </pre>
+                        )}
+                        <div className="flex flex-wrap gap-2">
+                          <Button size="sm" variant="outline" className="border-violet-700 text-violet-200" onClick={() => safeCopyText(snapshot.prompt)}>
+                            <Copy className="w-3 h-3 mr-1" /> Copy Prompt
+                          </Button>
+                          {snapshot.lyrics && (
+                            <Button size="sm" variant="outline" className="border-violet-700 text-violet-200" onClick={() => safeCopyText(snapshot.lyrics || "")}>
+                              <Copy className="w-3 h-3 mr-1" /> Copy Lyrics
+                            </Button>
+                          )}
+                          <Button size="sm" variant="outline" className="border-violet-700 text-violet-200" onClick={() => setFinalPromptSnapshot(version.id, snapshot.id)}>
+                            <Check className="w-3 h-3 mr-1" /> Mark Final
+                          </Button>
+                        </div>
+                        {snapshot.notes && <div className="text-[11px] text-zinc-400 whitespace-pre-line">{snapshot.notes}</div>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        );
+      }
+      case "generation": {
+        return (
+          <div className="space-y-4">
+            <Card className="bg-zinc-900/60 border-zinc-800">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-violet-200">
+                  <Rocket className="w-4 h-4" /> Version & Seed Timeline
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm text-zinc-300">
+                {versions.length === 0 ? (
+                  <p className="text-xs text-zinc-500">Log versions from the Generate stage to see the timeline here.</p>
+                ) : (
+                  versions.map(version => (
+                    <div key={version.id} className="rounded border border-zinc-800 bg-zinc-950/60 p-4 space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <div className="text-sm font-medium text-violet-200">{version.label}</div>
+                          <div className="text-xs text-zinc-500">Created {formatDate(version.createdAt)}</div>
+                        </div>
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-violet-900/40 text-violet-200 text-xs uppercase tracking-wide">
+                          {version.status}
+                        </span>
+                      </div>
+                      <div className="grid md:grid-cols-3 gap-3 text-xs text-zinc-400">
+                        <div>
+                          <div className="uppercase tracking-wide text-zinc-500">Seed</div>
+                          <div className="text-zinc-100">{version.seed || "—"}</div>
+                        </div>
+                        <div>
+                          <div className="uppercase tracking-wide text-zinc-500">BPM / Key</div>
+                          <div className="text-zinc-100">{version.bpm || "—"} {version.key || ""}</div>
+                        </div>
+                        <div>
+                          <div className="uppercase tracking-wide text-zinc-500">Links</div>
+                          <div className="flex flex-wrap gap-2 text-violet-300">
+                            {version.shareUrl && <a className="hover:text-violet-100" href={version.shareUrl} target="_blank" rel="noreferrer">Share</a>}
+                            {version.sunoUrl && <a className="hover:text-violet-100" href={version.sunoUrl} target="_blank" rel="noreferrer">Suno</a>}
+                          </div>
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-xs uppercase tracking-wide text-zinc-500">Prompt History</div>
+                        {version.promptHistory.length === 0 ? (
+                          <p className="text-xs text-zinc-500">Store prompts to build the iteration history.</p>
+                        ) : (
+                          <ul className="mt-2 space-y-1 text-[11px] leading-relaxed text-zinc-300 list-disc list-inside">
+                            {version.promptHistory.map((prompt, idx) => (
+                              <li key={`${version.id}_prompt_${idx}`} className="whitespace-pre-wrap">{prompt}</li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+            <Card className="bg-zinc-900/60 border-zinc-800">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-violet-200">
+                  <ListChecks className="w-4 h-4" /> Iteration Notes
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4 text-sm text-zinc-300">
+                <div className="space-y-3">
+                  <div className="grid md:grid-cols-4 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-xs uppercase tracking-wide text-zinc-500">Version</label>
+                      <select
+                        value={iterationDraft.versionId}
+                        onChange={e => setIterationDraft(draft => ({ ...draft, versionId: e.target.value }))}
+                        className="bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100"
+                      >
+                        <option value="">Select version</option>
+                        {versions.map(version => (
+                          <option key={version.id} value={version.id}>{version.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-1 md:col-span-3">
+                      <label className="text-xs uppercase tracking-wide text-zinc-500">Iteration Summary</label>
+                      <Input
+                        value={iterationDraft.summary}
+                        onChange={e => setIterationDraft(draft => ({ ...draft, summary: e.target.value }))}
+                        placeholder="Directive applied (e.g. tighten chorus guitars, boost choir pads)"
+                        className="bg-zinc-950 border-zinc-800"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid md:grid-cols-4 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-xs uppercase tracking-wide text-zinc-500">Suno URL</label>
+                      <Input
+                        value={iterationDraft.sunoUrl}
+                        onChange={e => setIterationDraft(draft => ({ ...draft, sunoUrl: e.target.value }))}
+                        placeholder="https://app.suno.ai/..."
+                        className="bg-zinc-950 border-zinc-800"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs uppercase tracking-wide text-zinc-500">Seed</label>
+                      <Input
+                        value={iterationDraft.seed}
+                        onChange={e => setIterationDraft(draft => ({ ...draft, seed: e.target.value }))}
+                        placeholder="seed-1234"
+                        className="bg-zinc-950 border-zinc-800"
+                      />
+                    </div>
+                    <div className="space-y-1 md:col-span-2">
+                      <label className="text-xs uppercase tracking-wide text-zinc-500">Enhancements</label>
+                      <Input
+                        value={iterationDraft.enhancements}
+                        onChange={e => setIterationDraft(draft => ({ ...draft, enhancements: e.target.value }))}
+                        placeholder="comma-separated directives"
+                        className="bg-zinc-950 border-zinc-800"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs uppercase tracking-wide text-zinc-500">Notes</label>
+                    <Textarea
+                      value={iterationDraft.notes}
+                      onChange={e => setIterationDraft(draft => ({ ...draft, notes: e.target.value }))}
+                      rows={3}
+                      className="bg-zinc-950 border-zinc-800"
+                      placeholder="What improved? What still fails?"
+                    />
+                  </div>
+                  <Button
+                    disabled={!iterationDraft.versionId || (!iterationDraft.summary.trim() && !iterationDraft.sunoUrl.trim())}
+                    onClick={addIterationEntry}
+                    className="bg-violet-600 hover:bg-violet-500 text-white"
+                  >
+                    <ListChecks className="w-4 h-4 mr-2" /> Log Iteration
+                  </Button>
+                </div>
+                {timelineEntries.length === 0 ? (
+                  <p className="text-xs text-zinc-500">Iteration moves will populate here as soon as you log prompt tweaks and regeneration links.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {timelineEntries.map(({ version, entry }) => (
+                      <div key={entry.id} className="rounded border border-zinc-800 bg-zinc-950/60 p-3 text-xs text-zinc-300 space-y-2">
+                        <div className="flex items-center justify-between text-[11px] uppercase tracking-wide text-zinc-500">
+                          <span>Version {version.label}</span>
+                          <span>{formatDate(entry.createdAt)}</span>
+                        </div>
+                        <div className="text-zinc-200">{entry.promptSummary || "Document how the prompt changed in this iteration."}</div>
+                        <div className="flex flex-wrap items-center gap-3 text-[11px] text-zinc-400">
+                          {entry.seed && <span>Seed: {entry.seed}</span>}
+                          {entry.enhancements.length > 0 && <span>Enhancements: {entry.enhancements.join(", ")}</span>}
+                        </div>
+                        {entry.sunoUrl && (
+                          <a className="text-violet-300 hover:text-violet-100" href={entry.sunoUrl} target="_blank" rel="noreferrer">Suno Link</a>
+                        )}
+                        {entry.notes && <div className="text-[11px] text-zinc-400">{entry.notes}</div>}
+                        <div className="flex justify-end">
+                          <Button size="sm" variant="ghost" className="text-rose-400" onClick={() => removeIterationEntry(version.id, entry.id)}>
+                            <Trash2 className="w-3 h-3 mr-1" /> Remove
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        );
+      }
+      case "mastering": {
+        return (
+          <div className="space-y-4">
+            <Card className="bg-zinc-900/60 border-zinc-800">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-violet-200">
+                  <Disc3 className="w-4 h-4" /> BandLab & QA Targets
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4 text-sm text-zinc-300">
+                {versions.length === 0 ? (
+                  <p className="text-xs text-zinc-500">As soon as a version reaches Mastering, log BandLab settings to track consistency.</p>
+                ) : (
+                  versions.map(version => (
+                    <div key={`${version.id}_mastering`} className="rounded border border-zinc-800 bg-zinc-950/60 p-4 space-y-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-medium text-violet-200">{version.label}</div>
+                          <div className="text-xs text-zinc-500">Created {formatDate(version.createdAt)}</div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 text-xs text-zinc-400">
+                          <div>
+                            <div className="uppercase tracking-wide text-zinc-500">Target LUFS</div>
+                            <Input
+                              value={version.masteringProfile.targetLufs || ""}
+                              onChange={e => updateMasteringProfile(version.id, profile => ({ ...profile, targetLufs: e.target.value.trim() || undefined }))}
+                              placeholder="-12"
+                              className="bg-zinc-950 border-zinc-800 text-sm"
+                            />
+                          </div>
+                          <div>
+                            <div className="uppercase tracking-wide text-zinc-500">Target TP</div>
+                            <Input
+                              value={version.masteringProfile.targetTruePeak || ""}
+                              onChange={e => updateMasteringProfile(version.id, profile => ({ ...profile, targetTruePeak: e.target.value.trim() || undefined }))}
+                              placeholder="-1.0"
+                              className="bg-zinc-950 border-zinc-800 text-sm"
+                            />
+                          </div>
+                          <div>
+                            <div className="uppercase tracking-wide text-zinc-500">Actual LUFS</div>
+                            <Input
+                              value={version.lufs || ""}
+                              onChange={e => updateVersionSimpleField(version.id, "lufs", e.target.value || undefined)}
+                              placeholder="-11.8"
+                              className="bg-zinc-950 border-zinc-800 text-sm"
+                            />
+                          </div>
+                          <div>
+                            <div className="uppercase tracking-wide text-zinc-500">Actual TP</div>
+                            <Input
+                              value={version.truePeak || ""}
+                              onChange={e => updateVersionSimpleField(version.id, "truePeak", e.target.value || undefined)}
+                              placeholder="-1.1"
+                              className="bg-zinc-950 border-zinc-800 text-sm"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="grid md:grid-cols-2 gap-4 text-xs text-zinc-400">
+                        <div className="space-y-2">
+                          <div className="uppercase tracking-wide text-zinc-500">BandLab Chain</div>
+                          <div className="grid gap-2">
+                            <Input
+                              value={version.masteringProfile.bandlab.chainPreset || ""}
+                              onChange={e => updateBandlabField(version.id, "chainPreset", e.target.value)}
+                              placeholder="Universal, Tape, etc."
+                              className="bg-zinc-950 border-zinc-800"
+                            />
+                            <Input
+                              value={version.masteringProfile.bandlab.engine || ""}
+                              onChange={e => updateBandlabField(version.id, "engine", e.target.value)}
+                              placeholder="Engine"
+                              className="bg-zinc-950 border-zinc-800"
+                            />
+                            <Input
+                              value={version.masteringProfile.bandlab.intensity || ""}
+                              onChange={e => updateBandlabField(version.id, "intensity", e.target.value)}
+                              placeholder="Intensity"
+                              className="bg-zinc-950 border-zinc-800"
+                            />
+                            <div className="grid grid-cols-2 gap-2">
+                              <Input
+                                value={version.masteringProfile.bandlab.inputGain || ""}
+                                onChange={e => updateBandlabField(version.id, "inputGain", e.target.value)}
+                                placeholder="Input"
+                                className="bg-zinc-950 border-zinc-800"
+                              />
+                              <Input
+                                value={version.masteringProfile.bandlab.outputGain || ""}
+                                onChange={e => updateBandlabField(version.id, "outputGain", e.target.value)}
+                                placeholder="Output"
+                                className="bg-zinc-950 border-zinc-800"
+                              />
+                            </div>
+                            <Input
+                              value={version.masteringProfile.bandlab.focus || ""}
+                              onChange={e => updateBandlabField(version.id, "focus", e.target.value)}
+                              placeholder="Focus"
+                              className="bg-zinc-950 border-zinc-800"
+                            />
+                            <Input
+                              value={version.masteringProfile.bandlab.tape || ""}
+                              onChange={e => updateBandlabField(version.id, "tape", e.target.value)}
+                              placeholder="Tape"
+                              className="bg-zinc-950 border-zinc-800"
+                            />
+                          </div>
+                          <Textarea
+                            value={version.masteringProfile.bandlab.notes || ""}
+                            onChange={e => updateBandlabField(version.id, "notes", e.target.value)}
+                            rows={3}
+                            className="bg-zinc-950 border-zinc-800"
+                            placeholder="Document tweaks: compare seeds, input gain adjustments, etc."
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <div className="uppercase tracking-wide text-zinc-500">Expose Metrics</div>
+                          <div className="grid gap-2">
+                            <Input
+                              value={version.masteringProfile.expose.lufsIntegrated || ""}
+                              onChange={e => updateExposeField(version.id, "lufsIntegrated", e.target.value)}
+                              placeholder="Integrated LUFS"
+                              className="bg-zinc-950 border-zinc-800"
+                            />
+                            <Input
+                              value={version.masteringProfile.expose.lufsShort || ""}
+                              onChange={e => updateExposeField(version.id, "lufsShort", e.target.value)}
+                              placeholder="Short-term LUFS"
+                              className="bg-zinc-950 border-zinc-800"
+                            />
+                            <Input
+                              value={version.masteringProfile.expose.truePeak || ""}
+                              onChange={e => updateExposeField(version.id, "truePeak", e.target.value)}
+                              placeholder="True Peak"
+                              className="bg-zinc-950 border-zinc-800"
+                            />
+                            <Input
+                              value={version.masteringProfile.expose.loudnessRange || ""}
+                              onChange={e => updateExposeField(version.id, "loudnessRange", e.target.value)}
+                              placeholder="Loudness Range"
+                              className="bg-zinc-950 border-zinc-800"
+                            />
+                            <Input
+                              value={version.masteringProfile.expose.crestFactor || ""}
+                              onChange={e => updateExposeField(version.id, "crestFactor", e.target.value)}
+                              placeholder="Crest"
+                              className="bg-zinc-950 border-zinc-800"
+                            />
+                            <select
+                              value={version.masteringProfile.expose.status || ""}
+                              onChange={e => updateExposeField(version.id, "status", e.target.value)}
+                              className="bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100"
+                            >
+                              <option value="">Status</option>
+                              <option value="ok">OK</option>
+                              <option value="warning">Warning</option>
+                              <option value="issue">Issue</option>
+                            </select>
+                          </div>
+                          <Textarea
+                            value={version.masteringProfile.expose.notes || ""}
+                            onChange={e => updateExposeField(version.id, "notes", e.target.value)}
+                            rows={3}
+                            className="bg-zinc-950 border-zinc-800"
+                            placeholder="Expose observations, spectrum reminders, etc."
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-2 text-xs text-zinc-400">
+                        <div className="grid md:grid-cols-2 gap-2">
+                          <Textarea
+                            value={version.masteringNotes || ""}
+                            onChange={e => updateVersionSimpleField(version.id, "masteringNotes", e.target.value || undefined)}
+                            rows={3}
+                            className="bg-zinc-950 border-zinc-800"
+                            placeholder="Additional mastering notes"
+                          />
+                          <Textarea
+                            value={version.exposeLog || ""}
+                            onChange={e => updateVersionSimpleField(version.id, "exposeLog", e.target.value || undefined)}
+                            rows={3}
+                            className="bg-zinc-950 border-zinc-800"
+                            placeholder="Paste EXPOSE log output for reference"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        );
+      }
+      case "release": {
+        return (
+          <div className="space-y-4">
+            <Card className="bg-zinc-900/60 border-zinc-800">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-violet-200">
+                  <Share2 className="w-4 h-4" /> Release Tracker
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4 text-sm text-zinc-300">
+                <div className="space-y-2">
+                  <label className="text-xs uppercase tracking-wide text-zinc-500">Catalog Notes</label>
+                  <Textarea
+                    value={selectedLibrarySong.catalogNotes || ""}
+                    onChange={e => updateSongField("catalogNotes", e.target.value || undefined)}
+                    rows={3}
+                    className="bg-zinc-950 border-zinc-800"
+                    placeholder="Album/playlist context, release strategy, marketing notes."
+                  />
+                </div>
+                {selectedAlbum && versions.length > 0 && (
+                  (() => {
+                    const exportVersion = exportVersionId
+                      ? versions.find(version => version.id === exportVersionId) ?? versions[versions.length - 1]
+                      : versions[versions.length - 1];
+                    const bundlePreview = exportVersion
+                      ? buildExportBundle(selectedAlbum, selectedLibrarySong, exportVersion)
+                      : undefined;
+                    const previewPrompt = exportVersion ? resolveFinalPrompt(exportVersion).prompt : "";
+                    const previewLine = previewPrompt.split("\n").find(Boolean) || "No prompt captured.";
+                    return (
+                      <Card className="bg-zinc-950/60 border-violet-700/40">
+                        <CardHeader>
+                          <CardTitle className="flex items-center gap-2 text-violet-200">
+                            <Download className="w-4 h-4" /> Export Bundle
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-3">
+                          <div className="grid md:grid-cols-2 gap-3">
+                            <div className="space-y-1">
+                              <label className="text-xs uppercase tracking-wide text-zinc-500">Version</label>
+                              <select
+                                value={exportVersion?.id || ""}
+                                onChange={e => setExportVersionId(e.target.value)}
+                                className="bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100"
+                              >
+                                {versions.map(version => (
+                                  <option key={version.id} value={version.id}>{version.label}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div className="space-y-1">
+                              <div className="text-xs uppercase tracking-wide text-zinc-500">Prompt Preview</div>
+                              <div className="text-xs text-zinc-400 bg-zinc-950/70 border border-zinc-800 rounded px-3 py-2 whitespace-pre-wrap">
+                                {previewLine.length > 160 ? `${previewLine.slice(0, 157)}…` : previewLine}
+                              </div>
+                            </div>
+                          </div>
+                          {bundlePreview && (
+                            <div className="space-y-1 text-xs text-zinc-400">
+                              <div className="uppercase tracking-wide text-zinc-500">Files</div>
+                              <ul className="list-disc list-inside space-y-1">
+                                {Object.keys(bundlePreview.files).map(name => (
+                                  <li key={name}>{name}</li>
+                                ))}
+                              </ul>
+                              <div className="text-[11px] text-zinc-500">Downloads plain text files for prompt, lyrics, meta, and notes.</div>
+                            </div>
+                          )}
+                          <div>
+                            <Button onClick={handleExportBundle} className="bg-violet-600 hover:bg-violet-500 text-white">
+                              <Download className="w-4 h-4 mr-2" /> Download Bundle
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  })()
+                )}
+                {versions.length === 0 ? (
+                  <p className="text-xs text-zinc-500">Finalize a version to start tracking release rollout.</p>
+                ) : (
+                  versions.map(version => (
+                    <div key={`${version.id}_release`} className="rounded border border-zinc-800 bg-zinc-950/60 p-4 space-y-3">
+                      <div className="grid md:grid-cols-2 gap-3 items-start">
+                        <div>
+                          <div className="text-sm font-medium text-violet-200">{version.label}</div>
+                          <div className="text-xs text-zinc-500">Created {formatDate(version.createdAt)}</div>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-xs uppercase tracking-wide text-zinc-500">Final Release URL</label>
+                          <Input
+                            value={version.finalReleaseUrl || ""}
+                            onChange={e => updateVersionSimpleField(version.id, "finalReleaseUrl", e.target.value || undefined)}
+                            placeholder="https://soundcloud.com/..."
+                            className="bg-zinc-950 border-zinc-800"
+                          />
+                        </div>
+                      </div>
+                      <div className="grid md:grid-cols-2 gap-3 text-xs text-zinc-400">
+                        <div className="space-y-1">
+                          <label className="uppercase tracking-wide text-zinc-500">Share URL</label>
+                          <Input
+                            value={version.shareUrl || ""}
+                            onChange={e => updateVersionSimpleField(version.id, "shareUrl", e.target.value || undefined)}
+                            placeholder="https://suno.ai/share/..."
+                            className="bg-zinc-950 border-zinc-800"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="uppercase tracking-wide text-zinc-500">Suno URL</label>
+                          <Input
+                            value={version.sunoUrl || ""}
+                            onChange={e => updateVersionSimpleField(version.id, "sunoUrl", e.target.value || undefined)}
+                            placeholder="https://app.suno.ai/song/..."
+                            className="bg-zinc-950 border-zinc-800"
+                          />
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs uppercase tracking-wide text-zinc-500">Release Plan</span>
+                          <span className="text-[11px] text-zinc-500">{version.releasePlans.length} entries</span>
+                        </div>
+                        {version.releasePlans.length === 0 ? (
+                          <p className="text-xs text-zinc-500">Add release entries (SoundCloud, Bandcamp, DSPs) once scheduled.</p>
+                        ) : (
+                          version.releasePlans.map(plan => (
+                            <div key={plan.id} className="rounded border border-zinc-800 bg-zinc-950/40 p-3 text-xs text-zinc-300 space-y-2">
+                              <div className="grid md:grid-cols-3 gap-2">
+                                <Input
+                                  value={plan.platform}
+                                  onChange={e => mutateVersion(version.id, current => ({
+                                    ...current,
+                                    releasePlans: current.releasePlans.map(r => r.id === plan.id ? { ...r, platform: e.target.value } : r)
+                                  }))}
+                                  placeholder="Platform"
+                                  className="bg-zinc-950 border-zinc-800"
+                                />
+                                <select
+                                  value={plan.status}
+                                  onChange={e => mutateVersion(version.id, current => ({
+                                    ...current,
+                                    releasePlans: current.releasePlans.map(r => r.id === plan.id ? { ...r, status: e.target.value as ReleaseStatus } : r)
+                                  }))}
+                                  className="bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100"
+                                >
+                                  {RELEASE_STATUSES.map(status => (
+                                    <option key={status} value={status}>{status}</option>
+                                  ))}
+                                </select>
+                                <Input
+                                  value={plan.releaseDate || ""}
+                                  onChange={e => mutateVersion(version.id, current => ({
+                                    ...current,
+                                    releasePlans: current.releasePlans.map(r => r.id === plan.id ? { ...r, releaseDate: e.target.value || undefined } : r)
+                                  }))}
+                                  placeholder="Release date"
+                                  className="bg-zinc-950 border-zinc-800"
+                                />
+                              </div>
+                              <Input
+                                value={plan.url || ""}
+                                onChange={e => mutateVersion(version.id, current => ({
+                                  ...current,
+                                  releasePlans: current.releasePlans.map(r => r.id === plan.id ? { ...r, url: e.target.value || undefined } : r)
+                                }))}
+                                placeholder="URL"
+                                className="bg-zinc-950 border-zinc-800"
+                              />
+                              <Textarea
+                                value={plan.notes || ""}
+                                onChange={e => mutateVersion(version.id, current => ({
+                                  ...current,
+                                  releasePlans: current.releasePlans.map(r => r.id === plan.id ? { ...r, notes: e.target.value || undefined } : r)
+                                }))}
+                                rows={2}
+                                className="bg-zinc-950 border-zinc-800"
+                                placeholder="Rollout notes, marketing tasks"
+                              />
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        );
+      }
+      case "analytics": {
+        const versionHealthList = versions.map(version => ({ version, health: deriveVersionHealth(version) }));
+        const pendingQa = versionHealthList.flatMap(item => item.health.qa.pending.map(key => ({ versionId: item.version.id, key })));
+        const outstandingFinalUrls = versionHealthList.filter(item => item.health.missingFinalUrl).map(item => item.version.id);
+        return (
+          <div className="space-y-4">
+            <Card className="bg-zinc-900/60 border-zinc-800">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-violet-200">
+                  <ClipboardList className="w-4 h-4" /> QA & Spectrum Notes
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="text-sm text-zinc-300 space-y-4">
+                <div className="space-y-2">
+                  <label className="text-xs uppercase tracking-wide text-zinc-500">Analytics Notes</label>
+                  <Textarea
+                    value={selectedLibrarySong.analyticsNotes || ""}
+                    onChange={e => updateSongField("analyticsNotes", e.target.value || undefined)}
+                    rows={3}
+                    className="bg-zinc-950 border-zinc-800"
+                    placeholder="Spectrum comments, loudness diagnostics, TODOs for next pass."
+                  />
+                </div>
+                {(pendingQa.length > 0 || outstandingFinalUrls.length > 0) && (
+                  <div className="rounded border border-amber-600/50 bg-amber-500/10 p-3 text-xs text-amber-200 space-y-1">
+                    <div className="uppercase tracking-wide text-[11px]">Outstanding Tasks</div>
+                    {pendingQa.length > 0 && (
+                      <div>
+                        <span className="font-medium">QA pending:</span> {pendingQa.length} check{pendingQa.length === 1 ? "" : "s"} open.
+                      </div>
+                    )}
+                    {outstandingFinalUrls.length > 0 && (
+                      <div>Missing final release URL for {outstandingFinalUrls.length} version(s).</div>
+                    )}
+                  </div>
+                )}
+                {versions.length === 0 ? (
+                  <p className="text-xs text-zinc-500">Log analytics notes per version to capture Expose outcomes, spectrum observations, and TODOs.</p>
+                ) : (
+                  versionHealthList.map(({ version, health }) => (
+                    <div key={`${version.id}_analytics`} className="rounded border border-zinc-800 bg-zinc-950/60 p-4 space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <div className="text-sm font-medium text-violet-200">{version.label}</div>
+                          <div className="text-xs text-zinc-500">Created {formatDate(version.createdAt)}</div>
+                        </div>
+                        <div className="flex items-center gap-2 text-[11px] text-zinc-400">
+                          <span>LUFS: {health.lufs ?? "–"}</span>
+                          <span>TP: {health.truePeak ?? "–"}</span>
+                          {health.exposeStatus && (
+                            <span>Status: {health.exposeStatus}</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-xs text-zinc-400 space-y-3">
+                        <div>
+                          <div className="uppercase tracking-wide text-zinc-500">QA Checklist</div>
+                          <div className="grid md:grid-cols-2 gap-2 mt-2">
+                            {Object.entries(version.qaChecks).map(([itemId, checked]) => (
+                              <button
+                                key={itemId}
+                                onClick={() => toggleVersionQaCheck(version.id, itemId)}
+                                className={`flex items-center justify-between gap-2 px-3 py-2 rounded border text-left transition ${
+                                  checked ? "border-emerald-600/60 bg-emerald-500/10 text-emerald-100" : "border-zinc-700 bg-zinc-950/60 text-zinc-300 hover:border-amber-500/60"
+                                }`}
+                              >
+                                <span>{QA_STATUS_LABELS[itemId] ?? itemId}</span>
+                                <Check className={`w-3 h-3 ${checked ? "text-emerald-300" : "text-zinc-600"}`} />
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="grid md:grid-cols-2 gap-3">
+                          <Textarea
+                            value={version.spectrumNotes || ""}
+                            onChange={e => updateVersionSimpleField(version.id, "spectrumNotes", e.target.value || undefined)}
+                            rows={3}
+                            className="bg-zinc-950 border-zinc-800"
+                            placeholder="Spectrum focus: e.g. tame 3k harshness, widen low mids..."
+                          />
+                          <div className="rounded border border-zinc-800 bg-zinc-950/60 p-3 space-y-2">
+                            <div className="uppercase tracking-wide text-zinc-500 text-[11px]">Spectrum Helper</div>
+                            <div className={`text-[11px] ${health.lufsOutOfRange ? "text-amber-300" : "text-zinc-400"}`}>
+                              Target LUFS −12 ±2 → {health.lufs === null ? "n/a" : `${health.lufs.toFixed(1)} dB`}
+                            </div>
+                            <div className={`text-[11px] ${health.truePeakOutOfRange ? "text-amber-300" : "text-zinc-400"}`}>
+                              True Peak ≤ −1 dBTP → {health.truePeak === null ? "n/a" : `${health.truePeak.toFixed(1)} dB`}
+                            </div>
+                            <div className="text-[11px] text-zinc-500">
+                              Status: {health.exposeStatus || "unknown"}
+                            </div>
+                            {health.missingFinalUrl && (
+                              <div className="text-[11px] text-amber-300">Add final release URL once published.</div>
+                            )}
+                          </div>
+                        </div>
+                        {version.exposeLog && (
+                          <div>
+                            <div className="uppercase tracking-wide text-zinc-500">Expose Log</div>
+                            <pre className="mt-1 text-[11px] whitespace-pre-wrap leading-relaxed bg-zinc-950/80 p-3 rounded text-zinc-300">{version.exposeLog}</pre>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        );
+      }
+      default:
+        return null;
+    }
+  };
 
   const stylePrompt = useMemo(() => {
     const lines = [
@@ -591,14 +2333,14 @@ export default function SunoMagixLike() {
       notes: projectDraftNotes.trim() || undefined,
       songs: []
     };
-    setProjects(prev => [...prev, project]);
+    updateProjectsState(prev => [...prev, project]);
     setProjectDraftName("");
     setProjectDraftNotes("");
     setSelectedProjectId(project.id);
   };
 
   const removeProject = (projectId: string) => {
-    setProjects(prev => prev.filter(p => p.id !== projectId));
+    updateProjectsState(prev => prev.filter(p => p.id !== projectId));
     if (selectedProjectId === projectId) {
       setSelectedProjectId("");
       setSelectedSongId("");
@@ -625,13 +2367,13 @@ export default function SunoMagixLike() {
       notes: songDraft.notes.trim() || undefined,
       versions: []
     };
-    setProjects(prev => prev.map(project => project.id === selectedProject.id ? { ...project, songs: [...project.songs, song] } : project));
+    updateProjectsState(prev => prev.map(project => project.id === selectedProject.id ? { ...project, songs: [...project.songs, song] } : project));
     setSongDraft({ title: "", bpm: "", key: "", structure: "", references: "", notes: "" });
     setSelectedSongId(song.id);
   };
 
   const removeSong = (songId: string) => {
-    setProjects(prev => prev.map(project => project.id === selectedProjectId ? { ...project, songs: project.songs.filter(song => song.id !== songId) } : project));
+    updateProjectsState(prev => prev.map(project => project.id === selectedProjectId ? { ...project, songs: project.songs.filter(song => song.id !== songId) } : project));
     if (selectedSongId === songId) {
       setSelectedSongId("");
       setSelectedVersionId("");
@@ -639,14 +2381,14 @@ export default function SunoMagixLike() {
   };
 
   const updateSong = (songId: string, updater: (song: SongRecord) => SongRecord) => {
-    setProjects(prev => prev.map(project => ({
+    updateProjectsState(prev => prev.map(project => ({
       ...project,
       songs: project.songs.map(song => song.id === songId ? updater(song) : song)
     })));
   };
 
   const updateVersion = (versionId: string, updater: (version: VersionRecord) => VersionRecord) => {
-    setProjects(prev => prev.map(project => ({
+    updateProjectsState(prev => prev.map(project => ({
       ...project,
       songs: project.songs.map(song => ({
         ...song,
@@ -679,7 +2421,7 @@ export default function SunoMagixLike() {
       takes: [],
       releasePlans: []
     };
-    setProjects(prev => prev.map(project => project.id === selectedProject!.id ? {
+    updateProjectsState(prev => prev.map(project => project.id === selectedProject!.id ? {
       ...project,
       songs: project.songs.map(song => song.id === selectedSong.id ? {
         ...song,
@@ -691,7 +2433,7 @@ export default function SunoMagixLike() {
   };
 
   const removeVersion = (versionId: string) => {
-    setProjects(prev => prev.map(project => ({
+    updateProjectsState(prev => prev.map(project => ({
       ...project,
       songs: project.songs.map(song => ({
         ...song,
@@ -2158,7 +3900,7 @@ export default function SunoMagixLike() {
                   <LibraryIcon className="w-5 h-5" /> Catalog Overview
                 </CardTitle>
               </CardHeader>
-              <CardContent className="text-sm text-zinc-300 grid md:grid-cols-3 gap-4">
+              <CardContent className="text-sm text-zinc-300 grid md:grid-cols-4 gap-4">
                 <div>
                   <div className="text-2xl font-semibold text-violet-200">{projects.length}</div>
                   <div className="text-xs uppercase tracking-wide text-zinc-400">Projects</div>
@@ -2170,6 +3912,21 @@ export default function SunoMagixLike() {
                 <div>
                   <div className="text-2xl font-semibold text-violet-200">{flattenedVersions.length}</div>
                   <div className="text-xs uppercase tracking-wide text-zinc-400">Versions</div>
+                </div>
+                <div>
+                  <div className="text-2xl font-semibold text-violet-200">{libraryStats.albumCount}</div>
+                  <div className="text-xs uppercase tracking-wide text-zinc-400 space-y-1">
+                    <div>Albums (Library)</div>
+                    <div className="text-[11px] uppercase tracking-wide text-zinc-500">
+                      {libraryStats.songCount} songs • {libraryStats.versionCount} versions
+                    </div>
+                    <div className="text-[11px] text-zinc-500 normal-case">
+                      Ready {libraryStats.albumStatusCounts.ready} • In progress {libraryStats.albumStatusCounts.inProgress}
+                    </div>
+                    <div className="text-[11px] text-zinc-500 normal-case">
+                      Needs attention {libraryStats.albumStatusCounts.attention} • Empty {libraryStats.albumStatusCounts.empty}
+                    </div>
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -2244,10 +4001,120 @@ export default function SunoMagixLike() {
                 )}
               </CardContent>
             </Card>
+
+            <Card className="bg-zinc-900/70 border-zinc-800">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-violet-200">
+                  <Layers className="w-5 h-5" /> Album Workflow Studio
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {libraryAlbums.length === 0 ? (
+                  <p className="text-xs text-zinc-500">Legacy projects are synced automatically. Add presets, prompts, and mastering notes in the new workflow once albums are created.</p>
+                ) : (
+                  <div className="grid md:grid-cols-[280px_1fr] gap-6">
+                    <div className="space-y-4">
+                      <div>
+                        <div className="mb-2 text-xs uppercase tracking-wide text-zinc-500">Albums</div>
+                        <div className="space-y-2">
+                          {libraryAlbums.map(album => {
+                            const isActive = album.id === selectedAlbumId;
+                            const albumHeadline = deriveAlbumHeadline(album);
+                            return (
+                              <button
+                                key={album.id}
+                                onClick={() => setSelectedAlbumId(album.id)}
+                                className={`w-full text-left rounded border px-3 py-2 text-sm transition ${
+                                  isActive ? "border-violet-600 bg-violet-950/40 text-violet-100" : "border-zinc-800 bg-zinc-950/60 text-zinc-300 hover:border-violet-700/60"
+                                }`}
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-medium">{album.name}</span>
+                                  <span className="text-xs text-zinc-500">{album.songs.length} songs</span>
+                                </div>
+                                {album.releaseTargetDate && (
+                                  <div className="mt-1 text-[11px] text-zinc-400">Target: {album.releaseTargetDate}</div>
+                                )}
+                                <div className="mt-2 flex flex-wrap items-center gap-2">
+                                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] ${albumHeadline.badgeClass}`}>
+                                    {albumHeadline.badgeText}
+                                  </span>
+                                  <span className="text-[11px] text-zinc-500">
+                                    Ready {albumHeadline.songCounts.healthy} • In progress {albumHeadline.songCounts.pending} • Needs attention {albumHeadline.songCounts.issue}
+                                  </span>
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="mb-2 text-xs uppercase tracking-wide text-zinc-500">Songs</div>
+                        {selectedAlbum?.songs.length ? (
+                          <div className="space-y-2">
+                            {selectedAlbum.songs.map(song => {
+                              const isActive = song.id === selectedLibrarySongId;
+                              const headline = deriveSongHeadline(song);
+                              return (
+                                <button
+                                  key={song.id}
+                                  onClick={() => setSelectedLibrarySongId(song.id)}
+                                  className={`w-full text-left rounded border px-3 py-2 text-sm transition ${
+                                    isActive ? "border-violet-600 bg-violet-950/40 text-violet-100" : "border-zinc-800 bg-zinc-950/60 text-zinc-300 hover:border-violet-700/60"
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="font-medium">{song.title}</span>
+                                    <span className="text-xs text-zinc-500">{song.versions.length} versions</span>
+                                  </div>
+                                  <div className="mt-2 flex items-center gap-2">
+                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] ${headline.badgeClass}`}>
+                                      {headline.badgeText}
+                                    </span>
+                                    <span className="text-[11px] text-zinc-500">{song.status}</span>
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-zinc-500">Add songs to this album to unlock the workflow tabs.</p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="space-y-4">
+                      <div className="flex flex-wrap gap-2">
+                        {SONG_WORKFLOW_TABS.map(tab => {
+                          const Icon = tab.icon;
+                          const isActive = tab.id === activeWorkflowTab;
+                          return (
+                            <Button
+                              key={tab.id}
+                              type="button"
+                              variant={isActive ? "default" : "outline"}
+                              className={isActive ? "bg-violet-700 hover:bg-violet-600" : "border-zinc-700 text-zinc-300"}
+                              onClick={() => setActiveWorkflowTab(tab.id)}
+                            >
+                              <Icon className="w-4 h-4 mr-2" />
+                              {tab.label}
+                            </Button>
+                          );
+                        })}
+                      </div>
+                      {selectedLibrarySong && (
+                        <div className="text-xs text-zinc-500">
+                          {selectedAlbum?.name} • {selectedLibrarySong.title} • {selectedLibrarySong.versions.length} versions
+                        </div>
+                      )}
+                      {renderSongWorkflowContent()}
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </div>
         </div>
       )}
     </div>
   );
 }
-
