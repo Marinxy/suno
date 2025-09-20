@@ -1689,17 +1689,18 @@ export default function SunoMagixLike() {
       
        {/* STEP 1: CREATE - Suno-like Interface */}
        {view === 'create' && (
-         <div className="flex-1 flex bg-gradient-to-br from-zinc-900 via-violet-950/30 to-zinc-900">
-           {/* LEFT PANE: Suno-style Input Controls */}
-           <div className="w-96 bg-zinc-900/50 border-r border-zinc-700 flex flex-col">
-             <div className="p-4 border-b border-zinc-700">
-               <h2 className="text-lg font-semibold text-violet-200 mb-2">🎵 Create Music</h2>
-               <p className="text-sm text-zinc-400">Configure your music parameters</p>
-      </div>
+         <div className="flex-1 flex flex-col bg-gradient-to-br from-zinc-900 via-violet-950/30 to-zinc-900">
+           {/* TOP HALF: Suno-style Input Controls */}
+           <div className="h-1/2 bg-zinc-900/50 border-b border-zinc-700 flex">
+             <div className="w-96 bg-zinc-900/50 border-r border-zinc-700 flex flex-col">
+               <div className="p-4 border-b border-zinc-700">
+                 <h2 className="text-lg font-semibold text-violet-200 mb-2">🎵 Create Music</h2>
+                 <p className="text-sm text-zinc-400">Configure your music parameters</p>
+               </div>
 
-             <div className="flex-1 overflow-y-auto p-4 space-y-6">
+               <div className="flex-1 overflow-y-auto p-4 space-y-3">
                {/* Lyrics Section */}
-               <div className="space-y-3">
+               <div className="space-y-2">
                  <div className="flex items-center justify-between">
                    <h3 className="text-sm font-medium text-zinc-300">Lyrics</h3>
                    <ChevronDown className="w-4 h-4 text-zinc-400" />
@@ -1708,7 +1709,7 @@ export default function SunoMagixLike() {
                    value={notes} 
                    onChange={(e) => setNotes(e.target.value)}
                    placeholder="Write some lyrics"
-                   className="bg-zinc-800 border-zinc-600 text-zinc-200 min-h-[120px]"
+                   className="bg-zinc-800 border-zinc-600 text-zinc-200 min-h-[80px]"
                  />
                  <Button 
                    variant={vocal === "none (instrumental)" ? "default" : "outline"}
@@ -1721,7 +1722,7 @@ export default function SunoMagixLike() {
                </div>
 
                {/* Styles Section */}
-               <div className="space-y-3">
+               <div className="space-y-2">
                  <div className="flex items-center justify-between">
                    <h3 className="text-sm font-medium text-zinc-300">Styles ({styles.length}/{STYLE_LIMIT})</h3>
                    <ChevronDown className="w-4 h-4 text-zinc-400" />
@@ -1827,7 +1828,7 @@ export default function SunoMagixLike() {
                </div>
 
                {/* Advanced Options */}
-               <div className="space-y-3">
+               <div className="space-y-2">
                  <div className="flex items-center justify-between">
                    <h3 className="text-sm font-medium text-zinc-300">Advanced Options</h3>
                    <ChevronDown className="w-4 h-4 text-zinc-400" />
@@ -1957,27 +1958,28 @@ export default function SunoMagixLike() {
                </div>
              </div>
 
-             {/* Bottom Actions */}
-             <div className="p-4 border-t border-zinc-700 space-y-3">
-               <div className="space-y-2">
-                 <label className="text-xs text-zinc-400">Add a song title</label>
-                 <Input 
-                   placeholder="Enter song title"
-                   className="bg-zinc-800 border-zinc-600 text-zinc-200 text-sm"
-                 />
+               {/* Bottom Actions */}
+               <div className="p-4 border-t border-zinc-700 space-y-3">
+                 <div className="space-y-2">
+                   <label className="text-xs text-zinc-400">Add a song title</label>
+                   <Input 
+                     placeholder="Enter song title"
+                     className="bg-zinc-800 border-zinc-600 text-zinc-200 text-sm"
+                   />
+                 </div>
+                 <div className="flex items-center gap-2">
+                   <Folder className="w-4 h-4 text-zinc-400" />
+                   <span className="text-xs text-zinc-400">Workspace:</span>
+                   <Button variant="outline" size="sm" className="text-xs border-zinc-600 text-zinc-300">
+                     New Project <ChevronDown className="w-3 h-3 ml-1" />
+                   </Button>
+                 </div>
                </div>
-              <div className="flex items-center gap-2">
-                 <Folder className="w-4 h-4 text-zinc-400" />
-                 <span className="text-xs text-zinc-400">Workspace:</span>
-                 <Button variant="outline" size="sm" className="text-xs border-zinc-600 text-zinc-300">
-                   New Project <ChevronDown className="w-3 h-3 ml-1" />
-                 </Button>
-               </div>
-              </div>
-            </div>
+             </div>
+           </div>
 
-           {/* RIGHT PANE: Generated Prompts */}
-           <div className="flex-1 p-6">
+           {/* BOTTOM HALF: Generated Prompts */}
+           <div className="h-1/2 p-6 overflow-y-auto">
              <div className="space-y-4">
                <h3 className="text-lg font-semibold text-violet-200 mb-4">Generated Prompts</h3>
                
