@@ -1,34 +1,47 @@
-# Master Implementation To-Do
+# Suno Master Studio 2.0 — Implementation To-Do
 
-## Roadmap Overview
-1. ✅ Data foundation & storage migration
-   - Converted legacy projects → album/song workflow (`convertLegacyProjectsToAlbums`).
-   - Synced back to `projects_v2` via bidirectional converters.
+The legacy prototype is complete. We now rebuild the app around the true workflow described in the latest brief.
 
-2. ✅ UI scaffolding for song-centric workflow
-   - Added album navigator, workflow tabs, and placeholder panels.
+## Phase 0 · Foundations
+1. ✅ Define new data model & store
+   - `lib/types.ts` defines Album/Song/Version structures
+   - `state/workspaceStore.tsx` exposes context-backed provider
+   - `sampleData.ts` seeds the workspace for onboarding
 
-3. ✅ Prompt workflow redesign (presets + GPT handoff)
-   - Brief tab supports presets, tag editing, GPT lyric brief, prompt snapshots.
+## Phase 1 · Application Shell
+2. ✅ Base layout and navigation
+   - Sidebar with Albums → Songs lists and selection state
+   - Top stepper tabs wired to placeholder workspace area
+   - Assistant drawer scaffolded with process checklist
 
-4. ✅ Generation log & iteration tracker
-   - Version timeline view, prompt history, iteration logging with Suno links.
+## Phase 2 · Prompt Workspace
+3. ✅ Prompt tab redesign (foundation)
+   - Tag selectors & style prompt preview with copy support
+   - Snapshot button appends to prompt history
+   - Final prompt textarea persists merged ChatGPT output
 
-5. ✅ Mastering module with BandLab + metrics
-   - Editable BandLab chain, LUFS/TP targets, EXPOSE metrics, mastering notes.
+## Phase 3 · Generation Timeline
+4. ✅ Generation tab (foundation)
+   - Suno take logger with keeper toggle and Suno links
+   - Iteration timeline form logs prompt tweaks / seeds / notes
+   - Displays history stack for quick regeneration context
 
-6. ✅ Release tracker & album dashboard
-   - Final URL, share links, release plan editor, album readiness badges.
+## Phase 4 · Mastering Control Room
+5. ✅ Mastering tab (foundation)
+   - BandLab preset + Expose metric forms committed to state
+   - QA checklist editable alongside mastering notes/log
 
-7. ✅ Analytics surface (Expose-style)
-   - QA toggles, spectrum helper, expose log review, outstanding-task alerts.
+## Phase 5 · Release Console
+6. ☐ Release tab
+   - Final URL entry, share/Suno links, platform rollout board
+   - Export bundle button + release calendar placeholder
 
-8. ✅ Export automation bundles
-   - Bundle schema for PROMPT/LYRICS/META/NOTES implemented with text downloads.
-   - Export card in Release tab selects version and downloads files.
-   - Uses bidirectional sync, so legacy projects remain consistent.
+## Phase 6 · Dashboard & Reminders
+7. ☐ Dashboard overhaul
+   - Album progress badges, active reminders, upcoming releases
+   - Global tag library & quick links
 
-## Upcoming After Bundles
-- ✅ Library health overview badges (album-level rollups) — albums now inherit readiness badges with song status breakdowns.
-- ✅ Optional spectrum visualization hooks — analytics tab accepts quick dB snapshots and renders placeholder bars.
-- ✅ Automated reminders / notifications — reminders card tracks outstanding QA, mastering, release tasks with dismiss/reset.
+## Phase 7 · Polish & Migration
+8. ☐ Data migration / cleanup
+   - Remove legacy monolithic `SunoApp.tsx`
+   - Migrate localStorage keys to new schema with upgrade script

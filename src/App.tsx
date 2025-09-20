@@ -1,8 +1,13 @@
-import SunoApp from './SunoApp'
+import AppShell from './components/layout/AppShell'
+import { WorkspaceProvider } from './state/workspaceStore'
+import { sampleAlbums } from './sampleData'
 
 function App() {
-  return <SunoApp />
+  return (
+    <WorkspaceProvider initialAlbums={sampleAlbums}>
+      <AppShell />
+    </WorkspaceProvider>
+  )
 }
 
 export default App
-
