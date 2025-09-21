@@ -24,7 +24,7 @@ export const sampleAlbums: Album[] = [
             label: "v1.2.0",
             createdAt: "2025-01-11T18:30:00.000Z",
             status: "release",
-            seed: "seed-2417",
+            seed: "seed-2417", // TODO: migrate old state
             bpm: "128",
             key: "E minor",
             duration: "2:48",
@@ -52,7 +52,7 @@ export const sampleAlbums: Album[] = [
                 createdAt: "2025-01-11T18:30:00.000Z",
                 promptSummary: "Locked guitars, widened pads",
                 sunoUrl: "https://app.suno.ai/share/fragment-final",
-                seed: "seed-2417",
+                seed: "seed-2417", // TODO: migrate old state
                 enhancements: ["wider_pads"],
                 notes: "Keeper version"
               }
@@ -73,7 +73,7 @@ export const sampleAlbums: Album[] = [
                 selected: true
               }
             ],
-            releasePlans: [
+            releasePlans: [ // TODO: migrate legacy release plan structures
               {
                 id: "release_soundcloud",
                 platform: "soundcloud",

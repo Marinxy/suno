@@ -6,6 +6,7 @@ import PromptWorkspace from "../prompt/PromptWorkspace"
 import GenerationWorkspace from "../generation/GenerationWorkspace"
 import MasteringWorkspace from "../mastering/MasteringWorkspace"
 import ReleaseWorkspace from "../release/ReleaseWorkspace"
+import DashboardSummary, { Reminder, UpcomingRelease } from "../dashboard/DashboardSummary"
 
 const workflowTabs: { id: WorkflowStage; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: "prompt", label: "Prompt", icon: MapPin },

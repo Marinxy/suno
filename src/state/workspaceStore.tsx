@@ -9,6 +9,7 @@ type WorkspaceContextValue = {
 const WorkspaceContext = createContext<WorkspaceContextValue | undefined>(undefined)
 
 export const WorkspaceProvider: React.FC<{ initialAlbums: Album[]; children: React.ReactNode }> = ({ initialAlbums, children }) => {
+  // TODO: migrate legacy localStorage schema before setting initial albums
   const [albums, setAlbums] = useState<Album[]>(initialAlbums)
 
   const value = useMemo<WorkspaceContextValue>(() => ({
